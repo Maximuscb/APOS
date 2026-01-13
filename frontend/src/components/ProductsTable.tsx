@@ -1,0 +1,268 @@
+import { useEffect, useMemo, useState } from "react";
+import { apiGet } from "../lib/api";
+import { datetimeLocalToUtcIso } from "../lib/time";
+
+type Product = {
+  id: number;
+  sku: string;
+  name: string;
+  price_cents: number | null;
+  is_active: boolean;
+  store_id: number;
+};
+
+type ProductPatch = {
+  name: string;
+  price_cents: number | null;
+  is_active: boolean;
+};
+
+type InventorySummary = {
+  store_id: number;
+  product_id: number;
+  quantity_on_hand: number;
+  weighted_average_cost_cents: number | null;
+  recent_unit_cost_cents: number | null;
+};
+
+const STORE_ID = 1;
+
+export function ProductsTable({
+  products,
+  onDelete,
+  onUpdate,
+  asOf,
+}: {
+  products: Product[];
+  onDelete: (id: number) => void;
+  onUpdate: (id: number, patch: ProductPatch) => Promise<void> | void;
+  asOf: string; // "" or ISO-like string
+}) {
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [name, setName] = useState("");
+  const [priceUsd, setPriceUsd] = useState("");
+  const [isActive, setIsActive] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [rowErr, setRowErr] = useState<string | null>(null);
+  const asOfUtcIso = useMemo(() => datetimeLocalToUtcIso(asOf), [asOf]);
+
+
+  const [invByProductId, setInvByProductId] = useState<Record<number, InventorySummary>>({});
+
+  function startEdit(p: Product) {
+    setEditingId(p.id);
+    setName(p.name);
+    setPriceUsd(p.price_cents == null ? "" : (p.price_cents / 100).toFixed(2));
+    setIsActive(p.is_active);
+    setRowErr(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setRowErr(null);
+    setSaving(false);
+  }
+
+  async function saveEdit(id: number) {
+    setRowErr(null);
+
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setRowErr("Name cannot be blank.");
+      return;
+    }
+
+    const s = priceUsd.trim();
+    let cents: number | null = null;
+    if (s) {
+      const n = Number(s);
+      if (!Number.isFinite(n) || n < 0) {
+        setRowErr("Price must be a number (>= 0).");
+        return;
+      }
+      cents = Math.round(n * 100);
+    }
+
+    setSaving(true);
+    try {
+      await onUpdate(id, { name: trimmed, price_cents: cents, is_active: isActive });
+      cancelEdit();
+    } catch (e: any) {
+      setRowErr(e?.message ?? "Failed to save.");
+      setSaving(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSummaries() {
+      const next: Record<number, InventorySummary> = {};
+      const qs = asOfUtcIso ? `&as_of=${encodeURIComponent(asOfUtcIso)}` : "";
+
+      for (const p of products) {
+        try {
+          const s = await apiGet<InventorySummary>(
+            `/api/inventory/${p.id}/summary?store_id=${STORE_ID}${qs}`
+          );
+          next[p.id] = s;
+        } catch {
+          // ignore per-row summary errors; keep UI usable
+        }
+      }
+
+      if (!cancelled) setInvByProductId(next);
+    }
+
+    if (products.length) loadSummaries();
+    else setInvByProductId({});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [products, asOfUtcIso]);
+
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <thead>
+        <tr>
+          {["SKU", "Name", "Price", "On Hand", "WAC", "Recent Cost", "Active", "Actions"].map(
+            (h) => (
+              <th
+                key={h}
+                style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}
+              >
+                {h}
+              </th>
+            )
+          )}
+        </tr>
+      </thead>
+
+      <tbody>
+        {products.length === 0 ? (
+          <tr>
+            <td colSpan={8} style={{ padding: 12 }}>
+              No products.
+            </td>
+          </tr>
+        ) : (
+          products.map((p) => {
+            const editing = editingId === p.id;
+            const inv = invByProductId[p.id];
+            const wac = inv?.weighted_average_cost_cents;
+            const recent = inv?.recent_unit_cost_cents;
+
+            return (
+              <tr key={p.id}>
+                <td
+                  style={{
+                    padding: 8,
+                    borderBottom: "1px solid #eee",
+                    fontFamily: "monospace",
+                  }}
+                >
+                  {p.sku}
+                </td>
+
+                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  {editing ? (
+                    <input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      style={{ width: "100%" }}
+                    />
+                  ) : (
+                    p.name
+                  )}
+                </td>
+
+                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  {editing ? (
+                    <input
+                      value={priceUsd}
+                      onChange={(e) => setPriceUsd(e.target.value)}
+                      placeholder="12.99"
+                      inputMode="decimal"
+                      style={{ width: 120 }}
+                    />
+                  ) : p.price_cents == null ? (
+                    "—"
+                  ) : (
+                    `$${(p.price_cents / 100).toFixed(2)}`
+                  )}
+                </td>
+
+                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  {inv?.quantity_on_hand ?? "—"}
+                </td>
+
+                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  {wac == null ? "—" : `$${(wac / 100).toFixed(2)}`}
+                </td>
+
+                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  {recent == null ? "—" : `$${(recent / 100).toFixed(2)}`}
+                </td>
+
+                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  {editing ? (
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={isActive}
+                        onChange={(e) => setIsActive(e.target.checked)}
+                      />
+                      Active
+                    </label>
+                  ) : p.is_active ? (
+                    "Yes"
+                  ) : (
+                    "No"
+                  )}
+                </td>
+
+                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  {editing ? (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        onClick={() => saveEdit(p.id)}
+                        disabled={saving}
+                        style={{ padding: "6px 10px", cursor: "pointer" }}
+                      >
+                        {saving ? "Saving…" : "Save"}
+                      </button>
+                      <button
+                        onClick={cancelEdit}
+                        disabled={saving}
+                        style={{ padding: "6px 10px", cursor: "pointer" }}
+                      >
+                        Cancel
+                      </button>
+                      {rowErr && <span style={{ color: "#9b1c1c" }}>{rowErr}</span>}
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => startEdit(p)}
+                        style={{ padding: "6px 10px", cursor: "pointer" }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => onDelete(p.id)}
+                        style={{ padding: "6px 10px", cursor: "pointer" }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })
+        )}
+      </tbody>
+    </table>
+  );
+}
