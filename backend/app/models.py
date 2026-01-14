@@ -122,6 +122,40 @@ class InventoryTransaction(db.Model):
     unit_cost_cents_at_sale = db.Column(db.Integer, nullable=True)
     cogs_cents = db.Column(db.Integer, nullable=True)
 
+    # ==================================================================================
+    # Phase 5: Document Lifecycle (Draft → Approved → Posted)
+    # ==================================================================================
+    # WHY: Prevents accidental posting, enables review workflows, and allows
+    # AI-generated drafts later without risk. Only POSTED transactions affect
+    # inventory calculations (on-hand qty, WAC, COGS).
+    #
+    # State transition rules (see lifecycle_service.py):
+    # - DRAFT → APPROVED (requires approval authority)
+    # - APPROVED → POSTED (finalizes; irreversible; affects ledger)
+    # - Cannot skip states (DRAFT → POSTED is forbidden)
+    # - Cannot reverse transitions (POSTED → APPROVED is forbidden)
+    #
+    # Default: POSTED (for backwards compatibility with existing transactions)
+    # New transactions default to DRAFT unless explicitly posted.
+    # ==================================================================================
+
+    status = db.Column(
+        db.String(16),
+        nullable=False,
+        default="POSTED",  # Backwards compatibility: existing data and old code auto-posts
+        index=True,  # Frequently filtered in queries
+    )
+
+    # Approval audit trail (nullable until User model exists)
+    # approved_by_user_id will reference users.id once auth is implemented
+    approved_by_user_id = db.Column(db.Integer, nullable=True)
+    approved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Posting audit trail (nullable until User model exists)
+    # posted_by_user_id will reference users.id once auth is implemented
+    posted_by_user_id = db.Column(db.Integer, nullable=True)
+    posted_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
 
     __table_args__ = (
         db.Index("ix_invtx_store_product_occurred", "store_id", "product_id", "occurred_at"),
@@ -147,6 +181,12 @@ class InventoryTransaction(db.Model):
             "sale_line_id": self.sale_line_id,
             "unit_cost_cents_at_sale": self.unit_cost_cents_at_sale,
             "cogs_cents": self.cogs_cents,
+            # Phase 5: Lifecycle fields
+            "status": self.status,
+            "approved_by_user_id": self.approved_by_user_id,
+            "approved_at": to_utc_z(self.approved_at) if self.approved_at else None,
+            "posted_by_user_id": self.posted_by_user_id,
+            "posted_at": to_utc_z(self.posted_at) if self.posted_at else None,
         }
 
 class MasterLedgerEvent(db.Model):

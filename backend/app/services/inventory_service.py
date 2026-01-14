@@ -30,6 +30,12 @@ Business invariants:
     sum(qty * unit_cost) / sum(qty)  (nearest-cent rounding, half-up)
   and is optionally as-of.
 
+Lifecycle (Phase 5):
+- ONLY transactions with status='POSTED' affect inventory calculations.
+- DRAFT and APPROVED transactions exist but are ignored in quantity/cost calculations.
+- Transactions default to POSTED for backwards compatibility with existing code.
+- Use status='DRAFT' parameter to create drafts that require approval before posting.
+
 Audit:
 - Each inventory transaction creation appends a MasterLedgerEvent in the same DB transaction.
 - Master ledger is append-only (no updates/deletes).
@@ -80,11 +86,21 @@ def _ensure_product_in_store(store_id: int, product_id: int, *, require_active: 
 
 
 def get_quantity_on_hand(store_id: int, product_id: int, as_of: datetime | None = None) -> int:
+    """
+    Calculate quantity on hand from POSTED transactions only.
+
+    CRITICAL: Only status='POSTED' transactions affect inventory.
+    DRAFT and APPROVED transactions are ignored.
+
+    WHY: Draft transactions haven't been finalized. Including them would
+    create phantom inventory that doesn't really exist.
+    """
     q = db.session.query(
         func.coalesce(func.sum(InventoryTransaction.quantity_delta), 0)
     ).filter(
         InventoryTransaction.store_id == store_id,
         InventoryTransaction.product_id == product_id,
+        InventoryTransaction.status == "POSTED",  # Phase 5: Only count posted
     )
     if as_of is not None:
         q = q.filter(InventoryTransaction.occurred_at <= as_of)
@@ -95,6 +111,15 @@ def get_quantity_on_hand(store_id: int, product_id: int, as_of: datetime | None 
 def get_weighted_average_cost_cents(
     store_id: int, product_id: int, as_of: datetime | None = None
 ) -> int | None:
+    """
+    Calculate weighted average cost from POSTED RECEIVE transactions only.
+
+    CRITICAL: Only status='POSTED' AND type='RECEIVE' transactions affect WAC.
+    DRAFT and APPROVED receive transactions are ignored.
+
+    WHY: WAC should only include inventory that's actually been posted to the books.
+    Draft receiving transactions might be corrections or data entry errors.
+    """
     q = db.session.query(
         func.coalesce(func.sum(InventoryTransaction.quantity_delta), 0).label("units"),
         func.coalesce(
@@ -105,6 +130,7 @@ def get_weighted_average_cost_cents(
         InventoryTransaction.store_id == store_id,
         InventoryTransaction.product_id == product_id,
         InventoryTransaction.type == "RECEIVE",
+        InventoryTransaction.status == "POSTED",  # Phase 5: Only count posted
     )
     if as_of is not None:
         q = q.filter(InventoryTransaction.occurred_at <= as_of)
@@ -122,10 +148,16 @@ def get_weighted_average_cost_cents(
 def get_recent_receive_cost_cents(
     store_id: int, product_id: int, as_of: datetime | None = None
 ) -> int | None:
+    """
+    Get the most recent POSTED receive cost.
+
+    CRITICAL: Only status='POSTED' transactions are considered.
+    """
     q = InventoryTransaction.query.filter_by(
         store_id=store_id,
         product_id=product_id,
         type="RECEIVE",
+        status="POSTED",  # Phase 5: Only count posted
     )
     if as_of is not None:
         q = q.filter(InventoryTransaction.occurred_at <= as_of)
@@ -145,7 +177,19 @@ def receive_inventory(
     unit_cost_cents: int,
     occurred_at=None,
     note: str | None = None,
+    status: str = "POSTED",  # Phase 5: Default POSTED for backwards compatibility
 ) -> InventoryTransaction:
+    """
+    Create a RECEIVE inventory transaction.
+
+    WHY status parameter:
+    - status='POSTED' (default): Immediately affects inventory (backwards compatible)
+    - status='DRAFT': Create draft that requires approval before affecting inventory
+    - status='APPROVED': Pre-approved, ready to post (uncommon for receives)
+
+    DESIGN NOTE: For direct receives (e.g., from POS interface or verified deliveries),
+    use default status='POSTED'. For data entry that needs review, use status='DRAFT'.
+    """
     _ensure_product_in_store(store_id, product_id, require_active=True)
 
     occurred_dt = _parse_occurred_at(occurred_at)
@@ -162,18 +206,22 @@ def receive_inventory(
         unit_cost_cents=unit_cost_cents,
         note=note,
         occurred_at=occurred_dt,
+        status=status,  # Phase 5: Lifecycle status
     )
     db.session.add(tx)
     db.session.flush()  # ensure tx.id is assigned before we reference it
 
-    append_ledger_event(
-        store_id=store_id,
-        event_type="INV_TX_CREATED",
-        entity_type="inventory_transaction",
-        entity_id=tx.id,
-        occurred_at=tx.occurred_at,
-        note=tx.note,
-    )
+    # Phase 5: Only append to master ledger if POSTED
+    # DRAFT and APPROVED transactions don't affect ledger until posted
+    if status == "POSTED":
+        append_ledger_event(
+            store_id=store_id,
+            event_type="INV_TX_CREATED",
+            entity_type="inventory_transaction",
+            entity_id=tx.id,
+            occurred_at=tx.occurred_at,
+            note=tx.note,
+        )
 
     db.session.commit()
     return tx
@@ -187,7 +235,20 @@ def adjust_inventory(
     quantity_delta: int,
     occurred_at=None,
     note: str | None = None,
+    status: str = "POSTED",  # Phase 5: Default POSTED for backwards compatibility
 ) -> InventoryTransaction:
+    """
+    Create an ADJUST inventory transaction.
+
+    WHY status parameter:
+    - status='POSTED' (default): Immediately affects inventory (backwards compatible)
+    - status='DRAFT': Create draft adjustment for review (recommended for manual corrections)
+    - status='APPROVED': Pre-approved, ready to post
+
+    DESIGN NOTE: Manual adjustments should typically use status='DRAFT' to require
+    manager approval before affecting inventory. Automatic adjustments (e.g., from
+    cycle counts) might use status='POSTED' directly.
+    """
     _ensure_product_in_store(store_id, product_id, require_active=True)
 
     occurred_dt = _parse_occurred_at(occurred_at)
@@ -196,10 +257,12 @@ def adjust_inventory(
     if occurred_dt > (now + timedelta(minutes=2)):
         raise ValueError("occurred_at cannot be in the future")
 
-    # Disallow negative on-hand at the effective time
-    current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
-    if current + quantity_delta < 0:
-        raise ValueError("adjustment would make on-hand negative")
+    # Phase 5: Only check negative on-hand for POSTED transactions
+    # DRAFT transactions don't affect inventory, so negative check doesn't apply
+    if status == "POSTED":
+        current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
+        if current + quantity_delta < 0:
+            raise ValueError("adjustment would make on-hand negative")
 
     tx = InventoryTransaction(
         store_id=store_id,
@@ -209,18 +272,21 @@ def adjust_inventory(
         unit_cost_cents=None,
         note=note,
         occurred_at=occurred_dt,
+        status=status,  # Phase 5: Lifecycle status
     )
     db.session.add(tx)
     db.session.flush()  # ensure tx.id is assigned before we reference it
 
-    append_ledger_event(
-        store_id=store_id,
-        event_type="INV_TX_CREATED",
-        entity_type="inventory_transaction",
-        entity_id=tx.id,
-        occurred_at=tx.occurred_at,
-        note=tx.note,
-    )
+    # Phase 5: Only append to master ledger if POSTED
+    if status == "POSTED":
+        append_ledger_event(
+            store_id=store_id,
+            event_type="INV_TX_CREATED",
+            entity_type="inventory_transaction",
+            entity_id=tx.id,
+            occurred_at=tx.occurred_at,
+            note=tx.note,
+        )
 
     db.session.commit()
     return tx
@@ -270,7 +336,18 @@ def sell_inventory(
     sale_line_id: str,
     occurred_at=None,
     note: str | None = None,
+    status: str = "POSTED",  # Phase 5: Sales typically posted immediately
 ) -> InventoryTransaction:
+    """
+    Create a SALE inventory transaction.
+
+    WHY status parameter:
+    - status='POSTED' (default): Sale is complete, affects inventory immediately
+    - status='DRAFT': Suspended/held sale (uncommon, for future quote/estimate support)
+
+    DESIGN NOTE: POS sales should always use status='POSTED'. Draft sales are for
+    future features like quotes, estimates, or suspended transactions.
+    """
     _ensure_product_in_store(store_id, product_id, require_active=True)
 
     occurred_dt = _parse_occurred_at(occurred_at)
@@ -290,15 +367,23 @@ def sell_inventory(
             raise ValueError("sale_id/sale_line_id already used for a different transaction")
         return existing
 
-    # Oversell check at effective time
-    current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
-    if current - quantity < 0:
-        raise ValueError("sale would make on-hand negative")
+    # Phase 5: Only perform business rule checks for POSTED transactions
+    # DRAFT sales don't affect inventory, so no need to check oversell or WAC
+    if status == "POSTED":
+        # Oversell check at effective time
+        current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
+        if current - quantity < 0:
+            raise ValueError("sale would make on-hand negative")
 
-    # Snapshot WAC at sale time
-    wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
-    if wac is None:
-        raise ValueError("cannot sell without a cost basis (no RECEIVE history as-of occurred_at)")
+        # Snapshot WAC at sale time
+        wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
+        if wac is None:
+            raise ValueError("cannot sell without a cost basis (no RECEIVE history as-of occurred_at)")
+    else:
+        # For DRAFT sales, we still snapshot WAC for reference, but don't enforce it
+        wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
+        if wac is None:
+            wac = 0  # Placeholder; will be recalculated on posting
 
     tx = InventoryTransaction(
         store_id=store_id,
@@ -312,18 +397,21 @@ def sell_inventory(
         cogs_cents=wac * quantity,
         note=note,
         occurred_at=occurred_dt,
+        status=status,  # Phase 5: Lifecycle status
     )
     db.session.add(tx)
     db.session.flush()
 
-    append_ledger_event(
-        store_id=store_id,
-        event_type="SALE_RECORDED",
-        entity_type="inventory_transaction",
-        entity_id=tx.id,
-        occurred_at=tx.occurred_at,
-        note=tx.note,
-    )
+    # Phase 5: Only append to master ledger if POSTED
+    if status == "POSTED":
+        append_ledger_event(
+            store_id=store_id,
+            event_type="SALE_RECORDED",
+            entity_type="inventory_transaction",
+            entity_id=tx.id,
+            occurred_at=tx.occurred_at,
+            note=tx.note,
+        )
 
     db.session.commit()
     return tx
