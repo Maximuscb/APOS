@@ -420,15 +420,16 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Why first:** The current auth system uses `STUB_HASH_password` which is explicitly insecure. This must be hardened before any production use.
 
-### Phase 7: Role-Based Permissions (HIGH PRIORITY)
-* Define permission constants (e.g., `CAN_APPROVE_ADJUSTMENTS`, `CAN_POST_SALES`, `CAN_MANAGE_USERS`)
-* Implement permission checking decorators/middleware
-* Assign default permissions to roles (admin, manager, cashier)
-* Add store-scoping to user permissions
-* Implement manager override workflows (PIN or biometric)
-* Add security event logging for permission checks
+### Phase 7: Role-Based Permissions ✅ COMPLETE
+* ✅ Define permission constants (22 permissions across 5 categories)
+* ✅ Implement permission checking decorators (@require_auth, @require_permission)
+* ✅ Assign default permissions to roles (admin: 22, manager: 18, cashier: 4)
+* ✅ Add security event logging for all permission checks
+* ✅ CLI commands for permission management (grant/revoke/check)
+* ⏳ Store-scoping to user permissions (deferred to multi-store phase)
+* ⏳ Manager override workflows (deferred to Phase 8 with registers)
 
-**Why second:** Roles exist but don't enforce anything yet. This is critical for accountability and preventing unauthorized actions.
+**Implemented:** Granular RBAC with 22 permissions enforced via decorators. All checks logged to security_events table. Permission management via CLI. Example routes protected (sales, lifecycle).
 
 ### Phase 8: Register Model & Session Management (MEDIUM PRIORITY)
 * Create Register model (device_id, location, current_user, current_shift)

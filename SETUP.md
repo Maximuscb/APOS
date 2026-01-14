@@ -2,8 +2,9 @@ Test Change
 # APOS Setup & CLI Guide
 
 **Phase 6: Production-Ready Authentication**
+**Phase 7: Role-Based Permissions**
 
-This guide covers setup, CLI commands, and security requirements for APOS.
+This guide covers setup, CLI commands, security, and permission management for APOS.
 
 ## Quick Start
 
@@ -89,6 +90,131 @@ curl -X POST http://localhost:5000/api/auth/login \
 ```
 
 Response includes `token` field for subsequent requests.
+
+---
+
+## Role-Based Permissions (Phase 7)
+
+### Permission System
+
+APOS implements granular RBAC with **22 permissions** across **5 categories**:
+
+**INVENTORY (5 permissions):**
+- VIEW_INVENTORY - View inventory quantities and transactions
+- RECEIVE_INVENTORY - Create RECEIVE transactions
+- ADJUST_INVENTORY - Create ADJUST transactions
+- APPROVE_ADJUSTMENTS - Approve DRAFT adjustments
+- VIEW_COGS - View cost calculations
+
+**SALES (5 permissions):**
+- CREATE_SALE - Create new sales documents (POS access)
+- POST_SALE - Post sales to inventory
+- VOID_SALE - Void posted sales
+- PROCESS_RETURN - Process product returns
+- VIEW_SALES_REPORTS - Access sales reports
+
+**DOCUMENTS (2 permissions):**
+- APPROVE_DOCUMENTS - DRAFT → APPROVED
+- POST_DOCUMENTS - APPROVED → POSTED
+
+**USERS (5 permissions):**
+- VIEW_USERS - View user accounts and roles
+- CREATE_USER - Create new user accounts
+- EDIT_USER - Edit user details
+- ASSIGN_ROLES - Assign roles to users
+- DEACTIVATE_USER - Deactivate user accounts
+
+**SYSTEM (5 permissions):**
+- MANAGE_PRODUCTS - Create/edit/deactivate products
+- MANAGE_IDENTIFIERS - Add/edit barcodes, SKUs
+- VIEW_AUDIT_LOG - Access security logs
+- MANAGE_PERMISSIONS - Grant/revoke permissions
+- SYSTEM_ADMIN - Full system access
+
+### Default Role Permissions
+
+| Permission | Admin | Manager | Cashier |
+|------------|-------|---------|---------|
+| **All 22 permissions** | ✅ | | |
+| **Most permissions (18)** | ✅ | ✅ | |
+| **POS operations only (4)** | ✅ | ✅ | ✅ |
+
+**Admin:** Full access (22 permissions)
+**Manager:** Management functions, no system admin (18 permissions)
+**Cashier:** POS only - VIEW_INVENTORY, CREATE_SALE, POST_SALE, PROCESS_RETURN (4 permissions)
+
+### Security Event Logging
+
+All permission checks are logged to `security_events` table:
+- **PERMISSION_GRANTED** - User has required permission
+- **PERMISSION_DENIED** - User lacks permission (403 response)
+- Includes: user_id, resource, action, IP address, user agent
+- Immutable audit trail for compliance
+
+### Permission Management CLI
+
+#### `flask init-permissions`
+Initialize permission system (creates all permissions and assigns defaults):
+
+```bash
+FLASK_APP=wsgi.py python -m flask init-permissions
+```
+
+Automatically run by `flask init-system`.
+
+#### `flask list-permissions`
+List all permissions:
+
+```bash
+# All permissions
+FLASK_APP=wsgi.py python -m flask list-permissions
+
+# Permissions for specific role
+FLASK_APP=wsgi.py python -m flask list-permissions --role cashier
+
+# Permissions in category
+FLASK_APP=wsgi.py python -m flask list-permissions --category SALES
+```
+
+#### `flask grant-permission`
+Grant permission to role:
+
+```bash
+FLASK_APP=wsgi.py python -m flask grant-permission cashier VOID_SALE
+```
+
+#### `flask revoke-permission`
+Revoke permission from role:
+
+```bash
+FLASK_APP=wsgi.py python -m flask revoke-permission cashier VOID_SALE
+```
+
+#### `flask check-permission`
+Check if user has permission:
+
+```bash
+FLASK_APP=wsgi.py python -m flask check-permission admin SYSTEM_ADMIN
+# Output: ✅ User 'admin' HAS permission 'SYSTEM_ADMIN'
+```
+
+### API Error Responses
+
+**401 Unauthorized** - Missing or invalid authentication token
+```json
+{
+  "error": "Authentication required"
+}
+```
+
+**403 Forbidden** - Valid auth but insufficient permission
+```json
+{
+  "error": "Permission denied",
+  "required_permission": "APPROVE_ADJUSTMENTS",
+  "message": "Permission denied: APPROVE_ADJUSTMENTS"
+}
+```
 
 ---
 

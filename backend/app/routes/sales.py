@@ -1,28 +1,36 @@
 # backend/app/routes/sales.py
-"""Phase 3: Sales API routes"""
+"""Phase 7: Sales API routes with permission enforcement"""
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 
 from ..models import Sale, SaleLine
 from ..extensions import db
 from ..services import sales_service
+from ..decorators import require_auth, require_permission
 
 
 sales_bp = Blueprint("sales", __name__, url_prefix="/api/sales")
 
 
 @sales_bp.post("/")
+@require_auth
+@require_permission("CREATE_SALE")
 def create_sale_route():
-    """Create new draft sale."""
+    """
+    Create new draft sale.
+
+    Requires: CREATE_SALE permission
+    Available to: admin, manager, cashier
+    """
     try:
         data = request.get_json() or {}
         store_id = data.get("store_id")
-        user_id = data.get("user_id")  # Nullable until auth complete
 
         if not store_id:
             return jsonify({"error": "store_id required"}), 400
 
-        sale = sales_service.create_sale(store_id, user_id)
+        # Use authenticated user from g.current_user
+        sale = sales_service.create_sale(store_id, g.current_user.id)
 
         return jsonify({"sale": sale.to_dict()}), 201
 
@@ -31,8 +39,15 @@ def create_sale_route():
 
 
 @sales_bp.post("/<int:sale_id>/lines")
+@require_auth
+@require_permission("CREATE_SALE")
 def add_line_route(sale_id: int):
-    """Add line to sale."""
+    """
+    Add line to sale.
+
+    Requires: CREATE_SALE permission
+    Available to: admin, manager, cashier
+    """
     try:
         data = request.get_json()
         product_id = data.get("product_id")
@@ -52,8 +67,15 @@ def add_line_route(sale_id: int):
 
 
 @sales_bp.post("/<int:sale_id>/post")
+@require_auth
+@require_permission("POST_SALE")
 def post_sale_route(sale_id: int):
-    """Post sale - creates inventory transactions."""
+    """
+    Post sale - creates inventory transactions.
+
+    Requires: POST_SALE permission
+    Available to: admin, manager, cashier
+    """
     try:
         sale = sales_service.post_sale(sale_id)
         return jsonify({"sale": sale.to_dict()}), 200
@@ -65,8 +87,15 @@ def post_sale_route(sale_id: int):
 
 
 @sales_bp.get("/<int:sale_id>")
+@require_auth
+@require_permission("CREATE_SALE")  # Can view sales if can create them
 def get_sale_route(sale_id: int):
-    """Get sale with lines."""
+    """
+    Get sale with lines.
+
+    Requires: CREATE_SALE permission
+    Available to: admin, manager, cashier
+    """
     sale = db.session.query(Sale).get(sale_id)
     if not sale:
         return jsonify({"error": "Sale not found"}), 404
