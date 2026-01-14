@@ -430,7 +430,7 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Implemented:** Granular RBAC with 22 permissions enforced via decorators. All checks logged to security_events table. Permission management via CLI. Example routes protected (sales, lifecycle).
 
-### Phase 8: Register Model & Session Management (MEDIUM PRIORITY)
+### ✅ Phase 8: Register Model & Session Management (COMPLETE)
 * Create Register model (device_id, location, current_user, current_shift)
 * Implement shift sign-in/sign-out with audit trail
 * Add cash drawer tracking (opening balance, transactions, closing balance)
@@ -438,7 +438,7 @@ Now that the foundational architecture is in place, here are the recommended nex
 * Add register assignment to Sale documents
 * Implement drawer open/close events with logging
 
-**Why third:** Needed for multi-register stores and cashier accountability. Builds on auth foundation.
+**Implemented:** Full register and shift management system. Registers track POS terminals with device IDs and locations. RegisterSessions provide cashier accountability with opening/closing cash and variance tracking. Cash drawer events (SHIFT_OPEN, SALE, NO_SALE, CASH_DROP, SHIFT_CLOSE) create immutable audit trail. Manager approval required for no-sale drawer opens and cash drops. Sales can now be linked to registers and sessions. CLI commands and REST API routes provided. 12 comprehensive tests passing.
 
 ### Phase 9: Payment Processing (MEDIUM PRIORITY)
 * Create Tender model (CASH, CARD, CHECK, etc.)
@@ -514,13 +514,9 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 ## 17. Known Limitations & Technical Debt
 
-* **Auth security:** Password hashing is stubbed (STUB_HASH_password)
-* **Session management:** No token-based sessions or expiration
-* **Permissions:** Roles exist but don't enforce anything
 * **Concurrency:** Basic oversell prevention only, no optimistic locking
 * **Payments:** Not implemented - sales can't be paid
 * **Returns:** Not implemented - no reversal mechanism
-* **Registers:** No device/shift tracking
 * **Multi-store:** Not tested, may have data leakage issues
 * **Receipts:** Not implemented
 * **Taxes:** Not implemented
