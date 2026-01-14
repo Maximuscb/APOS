@@ -14,8 +14,10 @@ import click
 from flask.cli import with_appcontext
 
 from .extensions import db
-from .models import Store, User, Role, UserRole
+from .models import Store, User, Role, UserRole, Permission, RolePermission
 from .services.auth_service import create_user, create_default_roles, assign_role, PasswordValidationError
+from .services import permission_service
+from .permissions import PERMISSION_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS
 
 
 @click.command('init-system')
@@ -49,6 +51,12 @@ def init_system():
     create_default_roles()
     roles = db.session.query(Role).all()
     click.echo(f"✅ Roles created: {', '.join(r.name for r in roles)}")
+
+    # 2.5. Initialize permissions (Phase 7)
+    click.echo("\n🔐 Initializing permissions...")
+    perm_count = permission_service.initialize_permissions()
+    assignment_count = permission_service.assign_default_role_permissions()
+    click.echo(f"✅ Created {perm_count} permissions, {assignment_count} role assignments")
 
     # 3. Create default users
     click.echo("\n👥 Creating default users...")
@@ -201,6 +209,174 @@ def reset_db(yes):
     click.echo("✅ Database reset complete. Run 'flask init-system' to initialize.")
 
 
+# =============================================================================
+# PHASE 7: PERMISSION MANAGEMENT COMMANDS
+# =============================================================================
+
+@click.command('init-permissions')
+@with_appcontext
+def init_permissions():
+    """
+    Phase 7: Initialize permission system.
+
+    Creates all permissions and assigns default permissions to roles.
+    Safe to run multiple times (idempotent).
+    """
+    click.echo("🔐 Phase 7: Initializing Permission System...")
+    click.echo("")
+
+    # 1. Create all permission definitions
+    click.echo("📋 Creating permissions...")
+    perm_count = permission_service.initialize_permissions()
+    click.echo(f"✅ Created {perm_count} new permissions")
+
+    total_perms = db.session.query(Permission).count()
+    click.echo(f"   Total permissions in system: {total_perms}")
+
+    # 2. Assign default permissions to roles
+    click.echo("\n🔗 Assigning default permissions to roles...")
+    assignment_count = permission_service.assign_default_role_permissions()
+    click.echo(f"✅ Created {assignment_count} new role-permission assignments")
+
+    # 3. Show summary
+    click.echo("\n📊 Permission Summary by Role:")
+    click.echo("="*60)
+
+    for role_name in ["admin", "manager", "cashier"]:
+        role = db.session.query(Role).filter_by(name=role_name).first()
+        if role:
+            role_perms = db.session.query(RolePermission).filter_by(role_id=role.id).all()
+            click.echo(f"  {role_name.upper():<10} → {len(role_perms)} permissions")
+
+    click.echo("="*60)
+    click.echo("\n✅ Permission system initialized successfully!")
+    click.echo("   Users with these roles now have enforced permissions.")
+    click.echo("")
+
+
+@click.command('list-permissions')
+@click.option('--role', help='Filter by role name')
+@click.option('--category', help='Filter by category')
+@with_appcontext
+def list_permissions_cli(role, category):
+    """List all permissions, optionally filtered by role or category."""
+    if role:
+        # Show permissions for a specific role
+        role_obj = db.session.query(Role).filter_by(name=role).first()
+        if not role_obj:
+            click.echo(f"❌ Role '{role}' not found")
+            return
+
+        role_perms = db.session.query(RolePermission).filter_by(role_id=role_obj.id).all()
+
+        click.echo(f"\n{'='*80}")
+        click.echo(f"Permissions for role: {role.upper()}")
+        click.echo(f"{'='*80}\n")
+
+        click.echo(f"{'Code':<30} {'Name':<35} {'Category'}")
+        click.echo("-"*80)
+
+        for rp in role_perms:
+            perm = db.session.query(Permission).get(rp.permission_id)
+            if perm:
+                click.echo(f"{perm.code:<30} {perm.name:<35} {perm.category}")
+
+        click.echo(f"\n Total: {len(role_perms)} permissions\n")
+
+    elif category:
+        # Show permissions in a category
+        perms = db.session.query(Permission).filter_by(category=category).all()
+
+        click.echo(f"\n{'='*80}")
+        click.echo(f"Permissions in category: {category}")
+        click.echo(f"{'='*80}\n")
+
+        click.echo(f"{'Code':<30} {'Name'}")
+        click.echo("-"*80)
+
+        for perm in perms:
+            click.echo(f"{perm.code:<30} {perm.name}")
+
+        click.echo(f"\n Total: {len(perms)} permissions\n")
+
+    else:
+        # Show all permissions grouped by category
+        perms = db.session.query(Permission).order_by(Permission.category, Permission.code).all()
+
+        click.echo(f"\n{'='*80}")
+        click.echo(f"All Permissions")
+        click.echo(f"{'='*80}\n")
+
+        current_category = None
+        for perm in perms:
+            if perm.category != current_category:
+                if current_category:
+                    click.echo("")
+                click.echo(f"📁 {perm.category}")
+                click.echo("-"*80)
+                current_category = perm.category
+
+            click.echo(f"  {perm.code:<28} {perm.name}")
+
+        click.echo(f"\n Total: {len(perms)} permissions\n")
+
+
+@click.command('grant-permission')
+@click.argument('role_name')
+@click.argument('permission_code')
+@with_appcontext
+def grant_permission_cli(role_name, permission_code):
+    """Grant a permission to a role."""
+    try:
+        permission_service.grant_permission_to_role(role_name, permission_code)
+        click.echo(f"✅ Granted '{permission_code}' to role '{role_name}'")
+    except ValueError as e:
+        click.echo(f"❌ Error: {str(e)}")
+
+
+@click.command('revoke-permission')
+@click.argument('role_name')
+@click.argument('permission_code')
+@with_appcontext
+def revoke_permission_cli(role_name, permission_code):
+    """Revoke a permission from a role."""
+    try:
+        revoked = permission_service.revoke_permission_from_role(role_name, permission_code)
+        if revoked:
+            click.echo(f"✅ Revoked '{permission_code}' from role '{role_name}'")
+        else:
+            click.echo(f"⚠️  Permission '{permission_code}' was not granted to '{role_name}'")
+    except ValueError as e:
+        click.echo(f"❌ Error: {str(e)}")
+
+
+@click.command('check-permission')
+@click.argument('username')
+@click.argument('permission_code')
+@with_appcontext
+def check_permission_cli(username, permission_code):
+    """Check if a user has a specific permission."""
+    user = db.session.query(User).filter_by(username=username).first()
+
+    if not user:
+        click.echo(f"❌ User '{username}' not found")
+        return
+
+    has_permission = permission_service.user_has_permission(user.id, permission_code)
+
+    if has_permission:
+        click.echo(f"✅ User '{username}' HAS permission '{permission_code}'")
+    else:
+        click.echo(f"❌ User '{username}' DOES NOT HAVE permission '{permission_code}'")
+
+    # Show user's roles and all permissions
+    roles = permission_service.get_user_role_names(user.id)
+    all_perms = permission_service.get_user_permissions(user.id)
+
+    click.echo(f"\nUser roles: {', '.join(roles)}")
+    click.echo(f"Total permissions: {len(all_perms)}")
+
+
 def register_commands(app):
     """Register all CLI commands with Flask app."""
     app.cli.add_command(init_system)
@@ -208,3 +384,10 @@ def register_commands(app):
     app.cli.add_command(create_user_cli)
     app.cli.add_command(list_users)
     app.cli.add_command(reset_db)
+
+    # Phase 7: Permission management
+    app.cli.add_command(init_permissions)
+    app.cli.add_command(list_permissions_cli)
+    app.cli.add_command(grant_permission_cli)
+    app.cli.add_command(revoke_permission_cli)
+    app.cli.add_command(check_permission_cli)

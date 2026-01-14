@@ -406,6 +406,119 @@ class UserRole(db.Model):
         }
 
 
+class Permission(db.Model):
+    """
+    Phase 7: Permissions for role-based access control.
+
+    WHY: Roles need enforceable permissions. This table defines what actions exist.
+    RolePermission links these to roles.
+
+    DESIGN: Permissions are identified by unique codes (e.g., "APPROVE_ADJUSTMENTS").
+    Categories group related permissions for UI display.
+    """
+    __tablename__ = "permissions"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(128), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    category = db.Column(db.String(64), nullable=False, index=True)  # INVENTORY, SALES, USERS, SYSTEM
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "code": self.code,
+            "name": self.name,
+            "description": self.description,
+            "category": self.category,
+            "created_at": to_utc_z(self.created_at),
+        }
+
+
+class RolePermission(db.Model):
+    """
+    Phase 7: Role-Permission association.
+
+    WHY: Defines which roles have which permissions.
+    Many-to-many relationship between roles and permissions.
+    """
+    __tablename__ = "role_permissions"
+    __table_args__ = (
+        db.UniqueConstraint("role_id", "permission_id", name="uq_role_permissions"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    role_id = db.Column(db.Integer, db.ForeignKey("roles.id"), nullable=False, index=True)
+    permission_id = db.Column(db.Integer, db.ForeignKey("permissions.id"), nullable=False, index=True)
+
+    granted_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    role = db.relationship("Role", backref=db.backref("role_permissions", lazy=True))
+    permission = db.relationship("Permission", backref=db.backref("role_permissions", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "role_id": self.role_id,
+            "permission_id": self.permission_id,
+            "granted_at": to_utc_z(self.granted_at),
+        }
+
+
+class SecurityEvent(db.Model):
+    """
+    Phase 7: Security event audit log.
+
+    WHY: Track permission checks, failed attempts, and security-relevant actions.
+    Critical for detecting unauthorized access attempts and compliance.
+
+    IMMUTABLE: Never update or delete. Append-only for audit integrity.
+    """
+    __tablename__ = "security_events"
+    __table_args__ = (
+        db.Index("ix_security_events_user_type", "user_id", "event_type"),
+        db.Index("ix_security_events_occurred", "occurred_at"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)  # Nullable for anonymous
+
+    # Event classification
+    event_type = db.Column(db.String(64), nullable=False, index=True)  # PERMISSION_DENIED, PERMISSION_GRANTED, LOGIN_FAILED, etc.
+    resource = db.Column(db.String(128), nullable=True)  # e.g., "/api/inventory/adjust"
+    action = db.Column(db.String(64), nullable=True)     # e.g., "POST", "APPROVE_ADJUSTMENT"
+
+    # Event details
+    success = db.Column(db.Boolean, nullable=False, index=True)
+    reason = db.Column(db.Text, nullable=True)  # e.g., "Missing permission: APPROVE_ADJUSTMENTS"
+
+    # Client context
+    ip_address = db.Column(db.String(45), nullable=True)
+    user_agent = db.Column(db.String(512), nullable=True)
+
+    occurred_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), index=True)
+
+    user = db.relationship("User", backref=db.backref("security_events", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "event_type": self.event_type,
+            "resource": self.resource,
+            "action": self.action,
+            "success": self.success,
+            "reason": self.reason,
+            "ip_address": self.ip_address,
+            "occurred_at": to_utc_z(self.occurred_at),
+        }
+
+
 class SessionToken(db.Model):
     """
     Phase 6: Secure session token management.

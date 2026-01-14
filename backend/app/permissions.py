@@ -1,0 +1,274 @@
+"""
+Phase 7: Permission System Constants and Definitions
+
+WHY: Centralized permission definitions ensure consistency across the application.
+All permission codes and role mappings defined here.
+
+DESIGN PRINCIPLES:
+- Permissions are granular (one action per permission)
+- Categories group related permissions for UI display
+- Default role mappings follow principle of least privilege
+- Admin has all permissions by default
+"""
+
+# =============================================================================
+# PERMISSION CATEGORIES
+# =============================================================================
+
+class PermissionCategory:
+    """Permission categories for organization."""
+    INVENTORY = "INVENTORY"
+    SALES = "SALES"
+    USERS = "USERS"
+    SYSTEM = "SYSTEM"
+    DOCUMENTS = "DOCUMENTS"
+
+
+# =============================================================================
+# PERMISSION DEFINITIONS
+# =============================================================================
+
+# Each permission is defined as: (code, name, description, category)
+PERMISSION_DEFINITIONS = [
+    # INVENTORY PERMISSIONS
+    (
+        "VIEW_INVENTORY",
+        "View Inventory",
+        "View inventory quantities and transactions",
+        PermissionCategory.INVENTORY
+    ),
+    (
+        "RECEIVE_INVENTORY",
+        "Receive Inventory",
+        "Create RECEIVE transactions (incoming stock)",
+        PermissionCategory.INVENTORY
+    ),
+    (
+        "ADJUST_INVENTORY",
+        "Adjust Inventory",
+        "Create ADJUST transactions (corrections, shrink, etc.)",
+        PermissionCategory.INVENTORY
+    ),
+    (
+        "APPROVE_ADJUSTMENTS",
+        "Approve Adjustments",
+        "Approve DRAFT inventory adjustments",
+        PermissionCategory.INVENTORY
+    ),
+    (
+        "VIEW_COGS",
+        "View COGS",
+        "View cost of goods sold and WAC calculations",
+        PermissionCategory.INVENTORY
+    ),
+
+    # SALES PERMISSIONS
+    (
+        "CREATE_SALE",
+        "Create Sale",
+        "Create new sales documents (POS access)",
+        PermissionCategory.SALES
+    ),
+    (
+        "POST_SALE",
+        "Post Sale",
+        "Post sales to inventory (finalize transaction)",
+        PermissionCategory.SALES
+    ),
+    (
+        "VOID_SALE",
+        "Void Sale",
+        "Void posted sales (requires manager override)",
+        PermissionCategory.SALES
+    ),
+    (
+        "PROCESS_RETURN",
+        "Process Return",
+        "Process product returns",
+        PermissionCategory.SALES
+    ),
+    (
+        "VIEW_SALES_REPORTS",
+        "View Sales Reports",
+        "Access sales reports and analytics",
+        PermissionCategory.SALES
+    ),
+
+    # DOCUMENT LIFECYCLE PERMISSIONS
+    (
+        "APPROVE_DOCUMENTS",
+        "Approve Documents",
+        "Approve DRAFT documents (DRAFT → APPROVED)",
+        PermissionCategory.DOCUMENTS
+    ),
+    (
+        "POST_DOCUMENTS",
+        "Post Documents",
+        "Post documents to ledger (APPROVED → POSTED)",
+        PermissionCategory.DOCUMENTS
+    ),
+
+    # USER MANAGEMENT PERMISSIONS
+    (
+        "VIEW_USERS",
+        "View Users",
+        "View user accounts and roles",
+        PermissionCategory.USERS
+    ),
+    (
+        "CREATE_USER",
+        "Create User",
+        "Create new user accounts",
+        PermissionCategory.USERS
+    ),
+    (
+        "EDIT_USER",
+        "Edit User",
+        "Edit user account details",
+        PermissionCategory.USERS
+    ),
+    (
+        "ASSIGN_ROLES",
+        "Assign Roles",
+        "Assign roles to users",
+        PermissionCategory.USERS
+    ),
+    (
+        "DEACTIVATE_USER",
+        "Deactivate User",
+        "Deactivate user accounts",
+        PermissionCategory.USERS
+    ),
+
+    # SYSTEM PERMISSIONS
+    (
+        "MANAGE_PRODUCTS",
+        "Manage Products",
+        "Create, edit, and deactivate products",
+        PermissionCategory.SYSTEM
+    ),
+    (
+        "MANAGE_IDENTIFIERS",
+        "Manage Identifiers",
+        "Add/edit product identifiers (barcodes, SKUs)",
+        PermissionCategory.SYSTEM
+    ),
+    (
+        "VIEW_AUDIT_LOG",
+        "View Audit Log",
+        "Access security and audit logs",
+        PermissionCategory.SYSTEM
+    ),
+    (
+        "MANAGE_PERMISSIONS",
+        "Manage Permissions",
+        "Grant/revoke permissions (admin only)",
+        PermissionCategory.SYSTEM
+    ),
+    (
+        "SYSTEM_ADMIN",
+        "System Administration",
+        "Full system access (admin only)",
+        PermissionCategory.SYSTEM
+    ),
+]
+
+
+# =============================================================================
+# DEFAULT ROLE PERMISSION MAPPINGS
+# =============================================================================
+
+# WHY these mappings:
+# - ADMIN: Full access to everything (trust model)
+# - MANAGER: Can approve, manage inventory, view reports, manage users
+# - CASHIER: POS only (create/post sales, view inventory for selling)
+
+DEFAULT_ROLE_PERMISSIONS = {
+    "admin": [
+        # Admin gets ALL permissions
+        "VIEW_INVENTORY",
+        "RECEIVE_INVENTORY",
+        "ADJUST_INVENTORY",
+        "APPROVE_ADJUSTMENTS",
+        "VIEW_COGS",
+        "CREATE_SALE",
+        "POST_SALE",
+        "VOID_SALE",
+        "PROCESS_RETURN",
+        "VIEW_SALES_REPORTS",
+        "APPROVE_DOCUMENTS",
+        "POST_DOCUMENTS",
+        "VIEW_USERS",
+        "CREATE_USER",
+        "EDIT_USER",
+        "ASSIGN_ROLES",
+        "DEACTIVATE_USER",
+        "MANAGE_PRODUCTS",
+        "MANAGE_IDENTIFIERS",
+        "VIEW_AUDIT_LOG",
+        "MANAGE_PERMISSIONS",
+        "SYSTEM_ADMIN",
+    ],
+
+    "manager": [
+        # Manager: Approvals, inventory management, user management, reports
+        "VIEW_INVENTORY",
+        "RECEIVE_INVENTORY",
+        "ADJUST_INVENTORY",
+        "APPROVE_ADJUSTMENTS",
+        "VIEW_COGS",
+        "CREATE_SALE",
+        "POST_SALE",
+        "VOID_SALE",  # Manager can void sales
+        "PROCESS_RETURN",
+        "VIEW_SALES_REPORTS",
+        "APPROVE_DOCUMENTS",
+        "POST_DOCUMENTS",
+        "VIEW_USERS",
+        "CREATE_USER",  # Manager can create cashier accounts
+        "EDIT_USER",
+        "MANAGE_PRODUCTS",
+        "MANAGE_IDENTIFIERS",
+        "VIEW_AUDIT_LOG",
+    ],
+
+    "cashier": [
+        # Cashier: POS operations only
+        "VIEW_INVENTORY",  # Need to see what's in stock
+        "CREATE_SALE",     # Primary job: ring up sales
+        "POST_SALE",       # Finalize sales
+        "PROCESS_RETURN",  # Handle returns
+    ],
+}
+
+
+# =============================================================================
+# PERMISSION HELPERS
+# =============================================================================
+
+def get_all_permission_codes():
+    """Get list of all permission codes."""
+    return [perm[0] for perm in PERMISSION_DEFINITIONS]
+
+
+def get_permissions_by_category(category):
+    """Get all permissions in a category."""
+    return [perm for perm in PERMISSION_DEFINITIONS if perm[3] == category]
+
+
+def get_permission_definition(code):
+    """Get full definition for a permission code."""
+    for perm in PERMISSION_DEFINITIONS:
+        if perm[0] == code:
+            return {
+                "code": perm[0],
+                "name": perm[1],
+                "description": perm[2],
+                "category": perm[3],
+            }
+    return None
+
+
+def validate_permission_code(code):
+    """Check if a permission code is valid."""
+    return code in get_all_permission_codes()
