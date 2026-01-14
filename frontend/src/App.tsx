@@ -7,6 +7,10 @@ import { InventoryLedger } from "./components/InventoryLedger";
 import { MasterLedger } from "./components/MasterLedger";
 import { ProductsTable } from "./components/ProductsTable";
 import { ReceiveInventoryForm } from "./components/ReceiveInventoryForm";
+import { IdentifierLookup } from "./components/IdentifierLookup";
+import { SalesInterface } from "./components/SalesInterface";
+import { AuthInterface } from "./components/AuthInterface";
+import { LifecycleManager } from "./components/LifecycleManager";
 
 type Health = any;
 
@@ -116,8 +120,17 @@ export default function App() {
         </div>
       )}
 
+      {/* Phase 4: Authentication */}
+      <AuthInterface />
+
+      {/* Phase 2: Identifier Lookup */}
+      <IdentifierLookup />
+
+      {/* Phase 3: Sales Interface */}
+      {!loadingProducts && <SalesInterface products={products} />}
+
       <div style={{ marginTop: 20 }}>
-        <h2 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 600 }}>Products</h2>
+        <h2 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 600 }}>Products & Inventory</h2>
 
         <div style={{ display: "flex", gap: 8, alignItems: "end", marginBottom: 8 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -156,6 +169,9 @@ export default function App() {
                 setInvRefreshToken((n) => n + 1);
               }}
             />
+
+            {/* Phase 1: Lifecycle Manager */}
+            <LifecycleManager refreshToken={invRefreshToken} />
 
             <InventoryLedger products={products} refreshToken={invRefreshToken} asOf={asOf} />
 
