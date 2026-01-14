@@ -322,6 +322,7 @@ def list_payment_transactions_route():
     Returns immutable payment transaction ledger.
     """
     from datetime import datetime
+    from sqlalchemy.exc import OperationalError, ProgrammingError
 
     sale_id = request.args.get("sale_id", type=int)
     transaction_type = request.args.get("transaction_type")
@@ -329,30 +330,41 @@ def list_payment_transactions_route():
     end_date = request.args.get("end_date")
     limit = request.args.get("limit", 100, type=int)
 
-    query = db.session.query(PaymentTransaction)
+    try:
+        query = db.session.query(PaymentTransaction)
 
-    if sale_id:
-        query = query.filter_by(sale_id=sale_id)
+        if sale_id:
+            query = query.filter_by(sale_id=sale_id)
 
-    if transaction_type:
-        query = query.filter_by(transaction_type=transaction_type)
+        if transaction_type:
+            query = query.filter_by(transaction_type=transaction_type)
 
-    if start_date:
-        try:
-            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-            query = query.filter(PaymentTransaction.occurred_at >= start_dt)
-        except ValueError:
-            return jsonify({"error": "Invalid start_date format"}), 400
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+                query = query.filter(PaymentTransaction.occurred_at >= start_dt)
+            except ValueError:
+                return jsonify({"error": "Invalid start_date format"}), 400
 
-    if end_date:
-        try:
-            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-            query = query.filter(PaymentTransaction.occurred_at <= end_dt)
-        except ValueError:
-            return jsonify({"error": "Invalid end_date format"}), 400
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                query = query.filter(PaymentTransaction.occurred_at <= end_dt)
+            except ValueError:
+                return jsonify({"error": "Invalid end_date format"}), 400
 
-    transactions = query.order_by(desc(PaymentTransaction.occurred_at)).limit(limit).all()
+        transactions = query.order_by(desc(PaymentTransaction.occurred_at)).limit(limit).all()
 
-    return jsonify({
-        "transactions": [t.to_dict() for t in transactions]
-    }), 200
+        return jsonify({"transactions": [t.to_dict() for t in transactions]}), 200
+
+    except (OperationalError, ProgrammingError) as e:
+        # Dev/stress-test friendly behavior:
+        # If DB was recreated and migrations haven't run yet, the ledger table may not exist.
+        # Return empty list (stable contract) instead of 500.
+        msg = str(e).lower()
+        if "no such table" in msg or "does not exist" in msg:
+            return jsonify({
+                "transactions": [],
+                "warning": "payment_transactions ledger table is missing; run migrations to enable audit trail"
+            }), 200
+        return jsonify({"error": "Database error", "detail": str(e)}), 500

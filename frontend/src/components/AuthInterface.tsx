@@ -9,12 +9,13 @@ type User = {
   is_active: boolean;
 };
 
-export function AuthInterface() {
+export function AuthInterface({ onAuthChange }: { onAuthChange?: () => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem("apos_token"));
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -42,12 +43,15 @@ export function AuthInterface() {
     setLoading(true);
     setError(null);
     try {
-      const result = await apiPost<{ user: User }>("/api/auth/login", {
+      const result = await apiPost<{ user: User; token: string }>("/api/auth/login", {
         username,
         password,
       });
       setCurrentUser(result.user);
+      setToken(result.token);
+      localStorage.setItem("apos_token", result.token);
       setPassword("");
+      onAuthChange?.();
     } catch (e: any) {
       setError(e?.message ?? "Login failed");
     } finally {
@@ -64,19 +68,34 @@ export function AuthInterface() {
     }
   }
 
+  async function handleLogout() {
+    setLoading(true);
+    setError(null);
+    try {
+      await apiPost("/api/auth/logout", {});
+    } catch (e: any) {
+      setError(e?.message ?? "Logout failed");
+    } finally {
+      setLoading(false);
+      setCurrentUser(null);
+      setToken(null);
+      localStorage.removeItem("apos_token");
+      onAuthChange?.();
+    }
+  }
+
   if (currentUser) {
     return (
-      <div style={{ marginTop: 20, padding: 12, border: "1px solid #ddd" }}>
-        <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 600 }}>
-          User: {currentUser.username}
-        </h3>
-        <div style={{ fontSize: 13, color: "#666" }}>
-          Email: {currentUser.email} | ID: {currentUser.id}
+      <div className="pos-card">
+        <h3>User session</h3>
+        <div className="pos-card__meta">
+          <div>{currentUser.username}</div>
+          <div className="muted">
+            {currentUser.email} | ID: {currentUser.id}
+          </div>
+          <div className="muted">Token: {token ? "stored" : "missing"}</div>
         </div>
-        <button
-          onClick={() => setCurrentUser(null)}
-          style={{ marginTop: 8, padding: "6px 12px" }}
-        >
+        <button className="btn btn--ghost" onClick={handleLogout} disabled={loading}>
           Logout
         </button>
       </div>
@@ -84,81 +103,61 @@ export function AuthInterface() {
   }
 
   return (
-    <div style={{ marginTop: 20, padding: 12, border: "1px solid #ddd" }}>
-      <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 600 }}>
-        Authentication (Stub)
-      </h3>
+    <div className="pos-card">
+      <h3>Authentication</h3>
 
-      {error && (
-        <div style={{ padding: 8, background: "#fff5f5", color: "#9b1c1c", fontSize: 13, marginBottom: 12 }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="alert">{error}</div>}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      <div className="pos-tabs">
         <button
           onClick={() => setMode("login")}
-          style={{
-            padding: "6px 12px",
-            background: mode === "login" ? "#3b82f6" : "#e5e7eb",
-            color: mode === "login" ? "white" : "black",
-            border: "none",
-          }}
+          className={`pos-tab ${mode === "login" ? "pos-tab--active" : ""}`}
         >
           Login
         </button>
         <button
           onClick={() => setMode("register")}
-          style={{
-            padding: "6px 12px",
-            background: mode === "register" ? "#3b82f6" : "#e5e7eb",
-            color: mode === "register" ? "white" : "black",
-            border: "none",
-          }}
+          className={`pos-tab ${mode === "register" ? "pos-tab--active" : ""}`}
         >
           Register
         </button>
-        <button onClick={initRoles} style={{ padding: "6px 12px", marginLeft: "auto" }}>
-          Init Roles
+        <button className="btn btn--ghost pos-tabs__action" onClick={initRoles}>
+          Init roles
         </button>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="pos-form">
         <input
+          className="input"
           type="text"
-          placeholder="Username"
+          placeholder="Username or email"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          style={{ padding: 8 }}
         />
         {mode === "register" && (
           <input
+            className="input"
             type="email"
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            style={{ padding: 8 }}
           />
         )}
         <input
+          className="input"
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (mode === "login" ? handleLogin() : handleRegister())}
-          style={{ padding: 8 }}
         />
         <button
+          className="btn btn--primary"
           onClick={mode === "login" ? handleLogin : handleRegister}
           disabled={loading}
-          style={{ padding: "8px 16px" }}
         >
-          {loading ? "..." : mode === "login" ? "Login" : "Register"}
+          {loading ? "Working..." : mode === "login" ? "Login" : "Register"}
         </button>
-      </div>
-
-      <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-        Note: Stub implementation (STUB_HASH_password)
       </div>
     </div>
   );

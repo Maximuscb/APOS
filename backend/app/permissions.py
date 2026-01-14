@@ -22,6 +22,8 @@ class PermissionCategory:
     USERS = "USERS"
     SYSTEM = "SYSTEM"
     DOCUMENTS = "DOCUMENTS"
+    REGISTERS = "REGISTERS"
+
 
 
 # =============================================================================
@@ -92,6 +94,18 @@ PERMISSION_DEFINITIONS = [
         "View Sales Reports",
         "Access sales reports and analytics",
         PermissionCategory.SALES
+    ),
+    (
+        "CREATE_REGISTER",
+        "Create Register",
+        "Create new POS registers/devices",
+        PermissionCategory.REGISTERS
+    ),
+    (
+        "MANAGE_REGISTER",
+        "Manage Registers",
+        "Create/edit/deactivate registers and register settings",
+        PermissionCategory.REGISTERS
     ),
 
     # DOCUMENT LIFECYCLE PERMISSIONS
@@ -186,6 +200,8 @@ PERMISSION_DEFINITIONS = [
 DEFAULT_ROLE_PERMISSIONS = {
     "admin": [
         # Admin gets ALL permissions
+        "CREATE_REGISTER",
+        "MANAGE_REGISTER",
         "VIEW_INVENTORY",
         "RECEIVE_INVENTORY",
         "ADJUST_INVENTORY",
@@ -212,6 +228,8 @@ DEFAULT_ROLE_PERMISSIONS = {
 
     "manager": [
         # Manager: Approvals, inventory management, user management, reports
+        "CREATE_REGISTER",
+        "MANAGE_REGISTER",
         "VIEW_INVENTORY",
         "RECEIVE_INVENTORY",
         "ADJUST_INVENTORY",

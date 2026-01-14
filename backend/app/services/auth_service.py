@@ -130,7 +130,14 @@ def authenticate(username: str, password: str) -> User | None:
     WHY: Central authentication function. All login flows go through here.
     Uses timing-safe comparison via bcrypt.
     """
-    user = db.session.query(User).filter_by(username=username, is_active=True).first()
+    user = (
+        db.session.query(User)
+        .filter(
+            db.or_(User.username == username, User.email == username),
+            User.is_active.is_(True),
+        )
+        .first()
+    )
 
     if not user:
         return None

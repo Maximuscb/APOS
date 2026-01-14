@@ -55,11 +55,11 @@ def login_route():
     """
     try:
         data = request.get_json()
-        username = data.get("username")
+        username = data.get("username") or data.get("email") or data.get("identifier")
         password = data.get("password")
 
         if not all([username, password]):
-            return jsonify({"error": "username and password required"}), 400
+            return jsonify({"error": "username/email and password required"}), 400
 
         # Authenticate user
         user = auth_service.authenticate(username, password)

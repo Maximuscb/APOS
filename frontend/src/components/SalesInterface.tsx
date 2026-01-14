@@ -87,104 +87,130 @@ export function SalesInterface({ products }: { products: Product[] }) {
   const total = lines.reduce((sum, line) => sum + line.line_total_cents, 0);
 
   return (
-    <div style={{ marginTop: 20, padding: 12, border: "1px solid #ddd" }}>
-      <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 600 }}>
-        Sales Interface (POS)
-      </h3>
-
-      {error && (
-        <div style={{ padding: 8, background: "#fff5f5", color: "#9b1c1c", fontSize: 13, marginBottom: 12 }}>
-          {error}
+    <div className="pos">
+      <div className="pos__header">
+        <div>
+          <div className="pos__eyebrow">Register 1</div>
+          <h3>Sales Terminal</h3>
+          <p className="muted">Open a sale, scan items, and post when tender is complete.</p>
         </div>
-      )}
+        <div className="pos__header-actions">
+          {currentSale ? (
+            <div className="pos__status">
+              <span className="chip">{currentSale.status}</span>
+              <span className="chip">Doc {currentSale.document_number}</span>
+            </div>
+          ) : (
+            <span className="chip">No active sale</span>
+          )}
+          <button className="btn btn--ghost" onClick={createNewSale} disabled={loading}>
+            New sale
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="alert">{error}</div>}
 
       {!currentSale ? (
-        <button onClick={createNewSale} disabled={loading} style={{ padding: "8px 16px" }}>
-          Start New Sale
-        </button>
-      ) : (
-        <div>
-          <div style={{ marginBottom: 12, padding: 8, background: "#f0f9ff", fontSize: 13 }}>
-            <strong>Sale:</strong> {currentSale.document_number} | Status: {currentSale.status}
-          </div>
-
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <select
-              value={selectedProductId ?? ""}
-              onChange={(e) => setSelectedProductId(Number(e.target.value))}
-              style={{ flex: 1, padding: 8 }}
-            >
-              <option value="">Select Product</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} - ${p.price_cents ? (p.price_cents / 100).toFixed(2) : "N/A"}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min="1"
-              value={quantity}
-              onChange={(e) => setQuantity(Number(e.target.value))}
-              style={{ width: 80, padding: 8 }}
-            />
-            <button onClick={addLineToSale} disabled={loading || !selectedProductId} style={{ padding: "8px 16px" }}>
-              Add
+        <div className="pos__empty">
+          <div className="pos__empty-card">
+            <div className="pos__empty-title">Start a sale to unlock the register.</div>
+            <p className="muted">Create a new sale, then add items and post.</p>
+            <button className="btn btn--primary" onClick={createNewSale} disabled={loading}>
+              Open new sale
             </button>
           </div>
+        </div>
+      ) : (
+        <div className="pos__body">
+          <div className="pos__left">
+            <div className="pos__add">
+              <select
+                className="input"
+                value={selectedProductId ?? ""}
+                onChange={(e) => setSelectedProductId(Number(e.target.value))}
+              >
+                <option value="">Select product</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} - ${p.price_cents ? (p.price_cents / 100).toFixed(2) : "N/A"}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={quantity}
+                onChange={(e) => setQuantity(Number(e.target.value))}
+              />
+              <button
+                className="btn btn--primary"
+                onClick={addLineToSale}
+                disabled={loading || !selectedProductId}
+              >
+                Add item
+              </button>
+            </div>
 
-          {lines.length > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ borderBottom: "1px solid #ddd" }}>
-                    <th style={{ textAlign: "left", padding: 4 }}>Product</th>
-                    <th style={{ textAlign: "right", padding: 4 }}>Qty</th>
-                    <th style={{ textAlign: "right", padding: 4 }}>Price</th>
-                    <th style={{ textAlign: "right", padding: 4 }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((line) => {
-                    const prod = products.find((p) => p.id === line.product_id);
-                    return (
-                      <tr key={line.id}>
-                        <td style={{ padding: 4 }}>{prod?.name ?? "Unknown"}</td>
-                        <td style={{ textAlign: "right", padding: 4 }}>{line.quantity}</td>
-                        <td style={{ textAlign: "right", padding: 4 }}>
-                          ${(line.unit_price_cents / 100).toFixed(2)}
-                        </td>
-                        <td style={{ textAlign: "right", padding: 4 }}>
-                          ${(line.line_total_cents / 100).toFixed(2)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <div style={{ marginTop: 8, textAlign: "right", fontWeight: 600 }}>
-                Total: ${(total / 100).toFixed(2)}
+            <div className="pos__cart">
+              <div className="pos__cart-header">
+                <span>Item</span>
+                <span>Qty</span>
+                <span>Price</span>
+                <span>Total</span>
+              </div>
+              {lines.length === 0 ? (
+                <div className="pos__cart-empty muted">No items in cart yet.</div>
+              ) : (
+                lines.map((line) => {
+                  const prod = products.find((p) => p.id === line.product_id);
+                  return (
+                    <div key={line.id} className="pos__cart-row">
+                      <span>{prod?.name ?? "Unknown"}</span>
+                      <span>{line.quantity}</span>
+                      <span>${(line.unit_price_cents / 100).toFixed(2)}</span>
+                      <span>${(line.line_total_cents / 100).toFixed(2)}</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="pos__right">
+            <div className="pos__summary">
+              <div className="pos__summary-row">
+                <span>Items</span>
+                <span>{lines.reduce((sum, line) => sum + line.quantity, 0)}</span>
+              </div>
+              <div className="pos__summary-row">
+                <span>Subtotal</span>
+                <span>${(total / 100).toFixed(2)}</span>
+              </div>
+              <div className="pos__summary-total">
+                <span>Total due</span>
+                <span>${(total / 100).toFixed(2)}</span>
               </div>
             </div>
-          )}
-
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={postSale}
-              disabled={loading || lines.length === 0}
-              style={{ padding: "8px 16px", background: "#10b981", color: "white", border: "none", cursor: "pointer" }}
-            >
-              Post Sale
-            </button>
-            <button
-              onClick={() => {
-                setCurrentSale(null);
-                setLines([]);
-              }}
-              style={{ padding: "8px 16px" }}
-            >
-              Cancel
-            </button>
+            <div className="pos__actions">
+              <button
+                className="btn btn--primary"
+                onClick={postSale}
+                disabled={loading || lines.length === 0}
+              >
+                Post sale
+              </button>
+              <button
+                className="btn btn--ghost"
+                onClick={() => {
+                  setCurrentSale(null);
+                  setLines([]);
+                }}
+              >
+                Cancel sale
+              </button>
+            </div>
           </div>
         </div>
       )}
