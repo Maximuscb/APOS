@@ -2,6 +2,8 @@
 """
 CLI commands for APOS initialization and maintenance.
 
+Phase 6: Updated for bcrypt password hashing and validation.
+
 Usage:
     flask init-system     - Initialize everything (roles + users + store)
     flask init-roles      - Create default roles only
@@ -13,7 +15,7 @@ from flask.cli import with_appcontext
 
 from .extensions import db
 from .models import Store, User, Role, UserRole
-from .services.auth_service import create_user, create_default_roles, assign_role
+from .services.auth_service import create_user, create_default_roles, assign_role, PasswordValidationError
 
 
 @click.command('init-system')
@@ -51,10 +53,15 @@ def init_system():
     # 3. Create default users
     click.echo("\n👥 Creating default users...")
 
+    # Default password meets Phase 6 requirements:
+    # - Minimum 8 characters
+    # - Uppercase, lowercase, digit, special char
+    default_password = "Password123!"
+
     default_users = [
-        ("admin", "admin@apos.local", "admin", "password123"),
-        ("manager", "manager@apos.local", "manager", "password123"),
-        ("cashier", "cashier@apos.local", "cashier", "password123"),
+        ("admin", "admin@apos.local", "admin", default_password),
+        ("manager", "manager@apos.local", "manager", default_password),
+        ("cashier", "cashier@apos.local", "cashier", default_password),
     ]
 
     for username, email, role_name, password in default_users:
@@ -65,7 +72,7 @@ def init_system():
                 click.echo(f"⚠️  User '{username}' already exists, skipping...")
                 continue
 
-            # Create user
+            # Create user (password will be hashed with bcrypt and validated)
             user = create_user(username, email, password, store_id=store.id)
 
             # Assign role
@@ -73,6 +80,8 @@ def init_system():
 
             click.echo(f"✅ Created user: {username} ({email}) with role '{role_name}'")
 
+        except PasswordValidationError as e:
+            click.echo(f"❌ Password validation failed for '{username}': {str(e)}")
         except Exception as e:
             click.echo(f"❌ Failed to create user '{username}': {str(e)}")
 
@@ -80,10 +89,13 @@ def init_system():
     click.echo("✨ APOS System Initialized Successfully!")
     click.echo("="*60)
     click.echo("\n📝 Default Credentials (CHANGE IN PRODUCTION!):")
-    click.echo("   admin    → admin@apos.local    / password123")
-    click.echo("   manager  → manager@apos.local  / password123")
-    click.echo("   cashier  → cashier@apos.local  / password123")
-    click.echo("\n🔒 SECURITY WARNING: Change all passwords immediately!")
+    click.echo("   admin    → admin@apos.local    / Password123!")
+    click.echo("   manager  → manager@apos.local  / Password123!")
+    click.echo("   cashier  → cashier@apos.local  / Password123!")
+    click.echo("\n🔒 SECURITY WARNING:")
+    click.echo("   - Passwords are now hashed with bcrypt (secure)")
+    click.echo("   - Change all passwords immediately in production!")
+    click.echo("   - Password requirements: 8+ chars, uppercase, lowercase, digit, special char")
     click.echo("")
 
 
@@ -104,7 +116,16 @@ def init_roles():
 @click.option('--role', type=click.Choice(['admin', 'manager', 'cashier']), prompt=True, help='Role')
 @with_appcontext
 def create_user_cli(username, email, password, role):
-    """Create a new user interactively."""
+    """
+    Create a new user interactively.
+
+    Phase 6: Password must meet strength requirements:
+    - Minimum 8 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character
+    """
     try:
         # Get default store
         store = db.session.query(Store).first()
@@ -112,14 +133,18 @@ def create_user_cli(username, email, password, role):
             click.echo("❌ No store found. Run 'flask init-system' first.")
             return
 
-        # Create user
+        # Create user (password will be hashed with bcrypt and validated)
         user = create_user(username, email, password, store_id=store.id)
 
         # Assign role
         assign_role(user.id, role)
 
         click.echo(f"✅ Created user: {username} ({email}) with role '{role}'")
+        click.echo("🔒 Password securely hashed with bcrypt")
 
+    except PasswordValidationError as e:
+        click.echo(f"❌ Password validation failed: {str(e)}")
+        click.echo("Requirements: 8+ chars, uppercase, lowercase, digit, special char")
     except Exception as e:
         click.echo(f"❌ Failed to create user: {str(e)}")
 
