@@ -36,5 +36,8 @@ def create_app() -> Flask:
     app.register_blueprint(sales_bp)
     app.register_blueprint(auth_bp)
 
+    # Register CLI commands
+    from .cli import register_commands
+    register_commands(app)
 
     return app
