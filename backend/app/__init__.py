@@ -26,6 +26,7 @@ def create_app() -> Flask:
     from .routes.identifiers import identifiers_bp  # Phase 2: Identifiers
     from .routes.sales import sales_bp  # Phase 3: Sales documents
     from .routes.auth import auth_bp  # Phase 4: Authentication
+    from .routes.registers import registers_bp  # Phase 8: Register management
 
     app.register_blueprint(system_bp)
     app.register_blueprint(products_bp)
@@ -35,6 +36,7 @@ def create_app() -> Flask:
     app.register_blueprint(identifiers_bp)
     app.register_blueprint(sales_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(registers_bp)
 
     # Register CLI commands
     from .cli import register_commands

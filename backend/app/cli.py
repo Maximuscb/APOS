@@ -377,6 +377,252 @@ def check_permission_cli(username, permission_code):
     click.echo(f"Total permissions: {len(all_perms)}")
 
 
+# =============================================================================
+# PHASE 8: REGISTER MANAGEMENT COMMANDS
+# =============================================================================
+
+@click.command('create-register')
+@click.option('--store-id', type=int, required=True, help='Store ID')
+@click.option('--number', required=True, help='Register number (e.g., REG-01)')
+@click.option('--name', required=True, help='Register name')
+@click.option('--location', help='Location in store')
+@click.option('--device-id', help='Device/hardware ID')
+@with_appcontext
+def create_register_cli(store_id, number, name, location, device_id):
+    """
+    Phase 8: Create a new POS register.
+
+    Example:
+        flask create-register --store-id 1 --number REG-01 --name "Front Counter 1" --location "Main Floor"
+    """
+    from .services import register_service
+    from .models import Register
+
+    try:
+        register = register_service.create_register(
+            store_id=store_id,
+            register_number=number,
+            name=name,
+            location=location,
+            device_id=device_id
+        )
+
+        click.echo(f"✅ Created register: {register.register_number} - {register.name}")
+        click.echo(f"   Store ID: {register.store_id}")
+        click.echo(f"   Location: {register.location or 'Not specified'}")
+        click.echo(f"   Register ID: {register.id}")
+
+    except ValueError as e:
+        click.echo(f"❌ Error: {str(e)}")
+    except Exception as e:
+        click.echo(f"❌ Failed to create register: {str(e)}")
+
+
+@click.command('list-registers')
+@click.option('--store-id', type=int, help='Filter by store ID')
+@click.option('--all', 'show_all', is_flag=True, help='Show inactive registers too')
+@with_appcontext
+def list_registers_cli(store_id, show_all):
+    """
+    Phase 8: List all registers.
+
+    Example:
+        flask list-registers
+        flask list-registers --store-id 1
+        flask list-registers --all
+    """
+    from .models import Register, RegisterSession
+
+    query = db.session.query(Register)
+
+    if store_id:
+        query = query.filter_by(store_id=store_id)
+
+    if not show_all:
+        query = query.filter_by(is_active=True)
+
+    registers = query.order_by(Register.register_number).all()
+
+    if not registers:
+        click.echo("No registers found.")
+        return
+
+    click.echo("\n" + "="*100)
+    click.echo(f"{'ID':<5} {'Number':<12} {'Name':<25} {'Location':<20} {'Active':<8} {'Status'}")
+    click.echo("="*100)
+
+    for register in registers:
+        # Check for open session
+        open_session = db.session.query(RegisterSession).filter_by(
+            register_id=register.id,
+            status="OPEN"
+        ).first()
+
+        status = "OPEN" if open_session else "CLOSED"
+        active_str = "Yes" if register.is_active else "No"
+        location = register.location or "-"
+
+        click.echo(f"{register.id:<5} {register.register_number:<12} {register.name:<25} {location:<20} {active_str:<8} {status}")
+
+    click.echo("="*100 + "\n")
+
+
+@click.command('open-shift')
+@click.option('--register-id', type=int, required=True, help='Register ID')
+@click.option('--username', required=True, help='Username opening the shift')
+@click.option('--opening-cash', type=float, default=0.0, help='Opening cash amount (e.g., 100.00)')
+@with_appcontext
+def open_shift_cli(register_id, username, opening_cash):
+    """
+    Phase 8: Open a new shift on a register.
+
+    Example:
+        flask open-shift --register-id 1 --username cashier --opening-cash 100.00
+    """
+    from .services import register_service
+    from .services.register_service import ShiftError
+
+    try:
+        # Find user
+        user = db.session.query(User).filter_by(username=username).first()
+        if not user:
+            click.echo(f"❌ User '{username}' not found")
+            return
+
+        # Convert dollars to cents
+        opening_cash_cents = int(opening_cash * 100)
+
+        session = register_service.open_shift(
+            register_id=register_id,
+            user_id=user.id,
+            opening_cash_cents=opening_cash_cents
+        )
+
+        click.echo(f"✅ Shift opened successfully!")
+        click.echo(f"   Session ID: {session.id}")
+        click.echo(f"   Register ID: {session.register_id}")
+        click.echo(f"   User: {username}")
+        click.echo(f"   Opening Cash: ${opening_cash:.2f}")
+        click.echo(f"   Opened At: {session.opened_at}")
+
+    except ShiftError as e:
+        click.echo(f"❌ Shift Error: {str(e)}")
+    except ValueError as e:
+        click.echo(f"❌ Error: {str(e)}")
+    except Exception as e:
+        click.echo(f"❌ Failed to open shift: {str(e)}")
+
+
+@click.command('close-shift')
+@click.option('--session-id', type=int, required=True, help='Session ID to close')
+@click.option('--closing-cash', type=float, required=True, help='Closing cash amount (e.g., 125.50)')
+@click.option('--notes', help='Optional notes about the shift')
+@with_appcontext
+def close_shift_cli(session_id, closing_cash, notes):
+    """
+    Phase 8: Close a shift and calculate variance.
+
+    Example:
+        flask close-shift --session-id 1 --closing-cash 125.50 --notes "Good shift"
+    """
+    from .services import register_service
+    from .services.register_service import ShiftError
+
+    try:
+        # Convert dollars to cents
+        closing_cash_cents = int(closing_cash * 100)
+
+        session = register_service.close_shift(
+            session_id=session_id,
+            closing_cash_cents=closing_cash_cents,
+            notes=notes
+        )
+
+        opening = session.opening_cash_cents / 100
+        expected = session.expected_cash_cents / 100
+        closing = session.closing_cash_cents / 100
+        variance = session.variance_cents / 100
+
+        click.echo(f"✅ Shift closed successfully!")
+        click.echo(f"   Session ID: {session.id}")
+        click.echo(f"   Opening Cash: ${opening:.2f}")
+        click.echo(f"   Expected Cash: ${expected:.2f}")
+        click.echo(f"   Closing Cash: ${closing:.2f}")
+        click.echo(f"   Variance: ${variance:+.2f}")
+
+        if abs(variance) > 0:
+            if variance > 0:
+                click.echo(f"   ⚠️  OVER by ${abs(variance):.2f}")
+            else:
+                click.echo(f"   ⚠️  SHORT by ${abs(variance):.2f}")
+        else:
+            click.echo(f"   ✅ Cash balanced perfectly!")
+
+        if session.notes:
+            click.echo(f"   Notes: {session.notes}")
+
+    except ShiftError as e:
+        click.echo(f"❌ Shift Error: {str(e)}")
+    except ValueError as e:
+        click.echo(f"❌ Error: {str(e)}")
+    except Exception as e:
+        click.echo(f"❌ Failed to close shift: {str(e)}")
+
+
+@click.command('list-sessions')
+@click.option('--register-id', type=int, help='Filter by register ID')
+@click.option('--status', type=click.Choice(['OPEN', 'CLOSED']), help='Filter by status')
+@click.option('--limit', type=int, default=20, help='Max sessions to show')
+@with_appcontext
+def list_sessions_cli(register_id, status, limit):
+    """
+    Phase 8: List register sessions.
+
+    Example:
+        flask list-sessions
+        flask list-sessions --register-id 1
+        flask list-sessions --status OPEN
+    """
+    from .models import RegisterSession, Register, User
+
+    query = db.session.query(RegisterSession)
+
+    if register_id:
+        query = query.filter_by(register_id=register_id)
+
+    if status:
+        query = query.filter_by(status=status)
+
+    sessions = query.order_by(RegisterSession.opened_at.desc()).limit(limit).all()
+
+    if not sessions:
+        click.echo("No sessions found.")
+        return
+
+    click.echo("\n" + "="*120)
+    click.echo(f"{'ID':<5} {'Register':<12} {'User':<15} {'Status':<8} {'Opened':<20} {'Variance':<12} {'Notes'}")
+    click.echo("="*120)
+
+    for session in sessions:
+        register = db.session.query(Register).get(session.register_id)
+        user = db.session.query(User).get(session.user_id)
+
+        register_num = register.register_number if register else "Unknown"
+        username = user.username if user else "Unknown"
+
+        variance_str = "-"
+        if session.variance_cents is not None:
+            variance = session.variance_cents / 100
+            variance_str = f"${variance:+.2f}"
+
+        notes = session.notes[:30] if session.notes else "-"
+
+        click.echo(f"{session.id:<5} {register_num:<12} {username:<15} {session.status:<8} "
+                  f"{str(session.opened_at)[:19]:<20} {variance_str:<12} {notes}")
+
+    click.echo("="*120 + "\n")
+
+
 def register_commands(app):
     """Register all CLI commands with Flask app."""
     app.cli.add_command(init_system)
@@ -391,3 +637,10 @@ def register_commands(app):
     app.cli.add_command(grant_permission_cli)
     app.cli.add_command(revoke_permission_cli)
     app.cli.add_command(check_permission_cli)
+
+    # Phase 8: Register management
+    app.cli.add_command(create_register_cli)
+    app.cli.add_command(list_registers_cli)
+    app.cli.add_command(open_shift_cli)
+    app.cli.add_command(close_shift_cli)
+    app.cli.add_command(list_sessions_cli)

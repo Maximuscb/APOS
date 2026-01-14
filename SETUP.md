@@ -218,6 +218,338 @@ FLASK_APP=wsgi.py python -m flask check-permission admin SYSTEM_ADMIN
 
 ---
 
+## Register Management (Phase 8)
+
+### Overview
+
+APOS tracks POS registers (terminals) and cashier shifts for accountability and audit trails.
+
+**Key Concepts:**
+- **Register:** Physical POS terminal (e.g., "Front Counter", "Drive-Thru")
+- **Register Session:** Cashier shift on a register (opening to closing)
+- **Cash Drawer Events:** Audit trail of all drawer opens (sales, no-sales, drops)
+- **Variance Tracking:** Compares expected vs actual cash at shift close
+
+### Register Lifecycle
+
+1. **Create Register** (admin/manager)
+   - Assign register number (e.g., REG-01)
+   - Set location and device ID
+   - Only done once per physical terminal
+
+2. **Open Shift** (cashier)
+   - Cashier signs in to register
+   - Records opening cash amount
+   - Creates RegisterSession (status: OPEN)
+   - Logs SHIFT_OPEN event
+
+3. **During Shift**
+   - Sales automatically linked to register and session
+   - No-sale drawer opens require manager approval
+   - Cash drops (remove excess cash) require manager approval
+   - All events logged to cash_drawer_events
+
+4. **Close Shift** (cashier)
+   - Count closing cash
+   - System calculates variance (expected vs actual)
+   - Session becomes CLOSED (immutable)
+   - Logs SHIFT_CLOSE event
+
+### Cash Drawer Event Types
+
+- **SHIFT_OPEN:** Drawer opened at shift start
+- **SALE:** Drawer opened for sale transaction (automatic)
+- **NO_SALE:** Drawer opened without sale (requires manager approval + reason)
+- **CASH_DROP:** Remove excess cash to safe (requires manager approval + reason)
+- **SHIFT_CLOSE:** Final cash count at shift end
+
+### Register Management CLI
+
+#### `flask create-register`
+Create a new POS register:
+
+```bash
+FLASK_APP=wsgi.py python -m flask create-register \
+  --store-id 1 \
+  --number "REG-01" \
+  --name "Front Counter Register 1" \
+  --location "Main Floor"
+```
+
+Optional: `--device-id` for hardware identifier (MAC address, serial number, etc.)
+
+#### `flask list-registers`
+List all registers:
+
+```bash
+# All active registers
+FLASK_APP=wsgi.py python -m flask list-registers
+
+# Specific store
+FLASK_APP=wsgi.py python -m flask list-registers --store-id 1
+
+# Include inactive
+FLASK_APP=wsgi.py python -m flask list-registers --all
+```
+
+Output:
+```
+====================================================================================================
+ID    Number       Name                      Location             Active   Status
+====================================================================================================
+1     REG-01       Front Counter Register 1  Main Floor           Yes      OPEN
+2     REG-02       Drive-Thru Register       Outside              Yes      CLOSED
+====================================================================================================
+```
+
+#### `flask open-shift`
+Open a new shift on a register:
+
+```bash
+FLASK_APP=wsgi.py python -m flask open-shift \
+  --register-id 1 \
+  --username cashier \
+  --opening-cash 100.00
+```
+
+Output:
+```
+✅ Shift opened successfully!
+   Session ID: 1
+   Register ID: 1
+   User: cashier
+   Opening Cash: $100.00
+   Opened At: 2026-01-14 17:43:00
+```
+
+**Rules:**
+- Only one shift can be open per register at a time
+- Attempting to open second shift returns error
+- Must close current shift before opening new one
+
+#### `flask close-shift`
+Close a shift and calculate variance:
+
+```bash
+FLASK_APP=wsgi.py python -m flask close-shift \
+  --session-id 1 \
+  --closing-cash 125.50 \
+  --notes "Good shift, no issues"
+```
+
+Output:
+```
+✅ Shift closed successfully!
+   Session ID: 1
+   Opening Cash: $100.00
+   Expected Cash: $120.00
+   Closing Cash: $125.50
+   Variance: $+5.50
+   ⚠️  OVER by $5.50
+   Notes: Good shift, no issues
+```
+
+**Variance Calculation:**
+- `variance = closing_cash - expected_cash`
+- Positive variance: Cash OVER (extra money in drawer)
+- Negative variance: Cash SHORT (missing money)
+- Zero variance: Perfectly balanced
+
+**Immutability:**
+- Once closed, sessions cannot be reopened or modified
+- Provides accurate historical accountability
+
+#### `flask list-sessions`
+List register sessions:
+
+```bash
+# All recent sessions (last 20)
+FLASK_APP=wsgi.py python -m flask list-sessions
+
+# Specific register
+FLASK_APP=wsgi.py python -m flask list-sessions --register-id 1
+
+# Only open sessions
+FLASK_APP=wsgi.py python -m flask list-sessions --status OPEN
+
+# More results
+FLASK_APP=wsgi.py python -m flask list-sessions --limit 50
+```
+
+Output:
+```
+========================================================================================================================
+ID    Register     User            Status   Opened               Variance     Notes
+========================================================================================================================
+2     REG-01       cashier         CLOSED   2026-01-14 17:43:00  $+5.50       Good shift, no issues
+1     REG-01       manager         CLOSED   2026-01-14 08:00:00  $-2.00       Short $2
+========================================================================================================================
+```
+
+### Register Management API
+
+All register routes require authentication (`Authorization: Bearer <token>`).
+
+#### Create Register
+```http
+POST /api/registers
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "store_id": 1,
+  "register_number": "REG-01",
+  "name": "Front Counter Register 1",
+  "location": "Main Floor",
+  "device_id": "MAC-00-11-22-33-44-55"
+}
+```
+
+Requires: `MANAGE_REGISTER` permission (admin, manager)
+
+#### List Registers
+```http
+GET /api/registers?store_id=1
+Authorization: Bearer <token>
+```
+
+Requires: `CREATE_SALE` permission (admin, manager, cashier)
+
+#### Get Register Details
+```http
+GET /api/registers/1
+Authorization: Bearer <token>
+```
+
+Returns register with current session status:
+```json
+{
+  "id": 1,
+  "register_number": "REG-01",
+  "name": "Front Counter Register 1",
+  "location": "Main Floor",
+  "is_active": true,
+  "current_session": {
+    "id": 5,
+    "status": "OPEN",
+    "user_id": 3,
+    "opening_cash_cents": 10000,
+    "opened_at": "2026-01-14T17:43:00Z"
+  }
+}
+```
+
+#### Open Shift
+```http
+POST /api/registers/1/shifts/open
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "opening_cash_cents": 10000
+}
+```
+
+Requires: `CREATE_SALE` permission
+Returns: `201 Created` with session details
+Error: `400 Bad Request` if register already has open shift
+
+#### Close Shift
+```http
+POST /api/registers/sessions/5/close
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "closing_cash_cents": 12550,
+  "notes": "Good shift"
+}
+```
+
+Requires: `CREATE_SALE` permission
+Returns: `200 OK` with closed session and variance
+
+#### No-Sale Drawer Open
+```http
+POST /api/registers/sessions/5/drawer/no-sale
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "approved_by_user_id": 2,
+  "reason": "Customer needed change for $20"
+}
+```
+
+Requires:
+- `CREATE_SALE` permission (cashier can request)
+- Manager approval (manager user ID required)
+- Reason must be provided
+
+Creates audit trail event (event_type: NO_SALE)
+
+#### Cash Drop
+```http
+POST /api/registers/sessions/5/drawer/cash-drop
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "amount_cents": 5000,
+  "approved_by_user_id": 2,
+  "reason": "Safe drop - drawer over $200"
+}
+```
+
+Requires:
+- `CREATE_SALE` permission
+- Manager approval
+- Positive amount
+
+Reduces `expected_cash_cents` by drop amount
+Creates audit trail event (event_type: CASH_DROP)
+
+#### List Drawer Events
+```http
+GET /api/registers/1/events?event_type=NO_SALE&limit=100
+Authorization: Bearer <token>
+```
+
+Query parameters:
+- `event_type`: Filter by type (SHIFT_OPEN, SALE, NO_SALE, CASH_DROP, SHIFT_CLOSE)
+- `start_date`: Filter after date (ISO 8601)
+- `end_date`: Filter before date (ISO 8601)
+- `limit`: Max events (default: 100)
+
+### Best Practices
+
+**Security:**
+- No-sale drawer opens always require manager approval
+- Cash drops always require manager approval
+- All events logged with user_id, timestamps, and reasons
+- Sessions are immutable once closed
+
+**Operations:**
+- Open shifts at start of cashier's shift
+- Perform cash drops when drawer exceeds $200 (adjust per store policy)
+- Count closing cash carefully to minimize variance
+- Document reasons for no-sale opens clearly
+- Close shifts promptly at end of cashier's shift
+
+**Accountability:**
+- Each session tracks one cashier's accountability period
+- Variance tracking identifies cash handling issues
+- Audit trail helps investigate discrepancies
+- Manager approvals create accountability chain
+
+**Reporting:**
+- Review variances daily
+- Investigate large or frequent shortages
+- Monitor no-sale events for suspicious patterns
+- Track cash drop compliance
+
+---
+
 ## CLI Commands
 
 ### System Initialization
@@ -609,12 +941,23 @@ cd frontend && npm run dev
 # Initialize system
 cd backend && FLASK_APP=wsgi.py python -m flask init-system
 
-# List users
+# User Management
 cd backend && FLASK_APP=wsgi.py python -m flask list-users
-
-# Create user
 cd backend && FLASK_APP=wsgi.py python -m flask create-user
 
-# Run tests
+# Permission Management (Phase 7)
+cd backend && FLASK_APP=wsgi.py python -m flask list-permissions
+cd backend && FLASK_APP=wsgi.py python -m flask check-permission admin SYSTEM_ADMIN
+
+# Register Management (Phase 8)
+cd backend && FLASK_APP=wsgi.py python -m flask create-register --store-id 1 --number "REG-01" --name "Front Counter"
+cd backend && FLASK_APP=wsgi.py python -m flask list-registers
+cd backend && FLASK_APP=wsgi.py python -m flask open-shift --register-id 1 --username cashier --opening-cash 100.00
+cd backend && FLASK_APP=wsgi.py python -m flask close-shift --session-id 1 --closing-cash 125.50
+cd backend && FLASK_APP=wsgi.py python -m flask list-sessions
+
+# Run Tests
 cd backend && python Audit.py
+cd backend && python PermissionAudit.py
+cd backend && python RegisterTests.py
 ```
