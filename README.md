@@ -340,6 +340,7 @@ All AI actions:
 
 As of now, the system has:
 
+**Core Features (Implemented):**
 * Backend-authoritative architecture
 * Product master with lifecycle auditing
 * Append-only inventory ledger
@@ -350,7 +351,44 @@ As of now, the system has:
 * Master ledger integration
 * Verified invariants via executable audit scripts
 
+**Phase 1: Document Lifecycle (✅ Complete)**
+* DRAFT → APPROVED → POSTED state machine
+* Only POSTED transactions affect inventory
+* Approval/posting audit trail
+* Prevents accidental posting
+
+**Phase 2: Identifier System (✅ Complete)**
+* ProductIdentifier model (SKU, UPC, ALT_BARCODE, VENDOR_CODE)
+* Deterministic lookup with priority
+* Prevents barcode conflicts and silent mis-scans
+
+**Phase 3: Sale Documents (✅ Complete)**
+* Sale & SaleLine models
+* Document-first approach (not inventory-first)
+* Cart → Post workflow
+* Enables suspend/recall, quotes/estimates
+
+**Phase 4: User Authentication (✅ Basic Implementation)**
+* User, Role, UserRole models
+* Default roles: admin, manager, cashier
+* Stub password hashing (needs bcrypt for production)
+* User attribution foundation
+
+**CLI Tools (✅ Complete)**
+* `flask init-system` - Initialize everything
+* `flask create-user` - Interactive user creation
+* `flask list-users` - List all users
+* See SETUP.md for complete CLI reference
+
+**Frontend Testing Interface (✅ Complete)**
+* Identifier lookup (barcode scanner simulation)
+* Sales interface (mini POS)
+* Lifecycle manager (approve/post queue)
+* Auth interface (register/login)
+* All existing features maintained
+
 The system is **intentionally incomplete**, but structurally correct.
+See **SETUP.md** for installation and CLI commands.
 
 ---
 
@@ -367,16 +405,129 @@ If something feels “easy,” it is probably wrong.
 
 ---
 
-## 16. Next Directions (When Ready)
+## 16. Next Steps (Priority Order)
 
-* Harden concurrency controls
-* Build register-level sale documents
-* Introduce tenders/payments
-* Add returns with COGS reversal
-* Expand inventory operations
-* Add users, permissions, and security
-* Move toward multi-store
-* Only then consider AI
+Now that the foundational architecture is in place, here are the recommended next steps in priority order:
+
+### Phase 6: Production-Ready Authentication (HIGH PRIORITY)
+* Replace stub password hashing with bcrypt
+* Implement proper session management with secure tokens
+* Add password strength requirements and validation
+* Implement session timeout and idle logout
+* Add "remember me" functionality (optional)
+* Enable HTTPS enforcement for production
+
+**Why first:** The current auth system uses `STUB_HASH_password` which is explicitly insecure. This must be hardened before any production use.
+
+### Phase 7: Role-Based Permissions (HIGH PRIORITY)
+* Define permission constants (e.g., `CAN_APPROVE_ADJUSTMENTS`, `CAN_POST_SALES`, `CAN_MANAGE_USERS`)
+* Implement permission checking decorators/middleware
+* Assign default permissions to roles (admin, manager, cashier)
+* Add store-scoping to user permissions
+* Implement manager override workflows (PIN or biometric)
+* Add security event logging for permission checks
+
+**Why second:** Roles exist but don't enforce anything yet. This is critical for accountability and preventing unauthorized actions.
+
+### Phase 8: Register Model & Session Management (MEDIUM PRIORITY)
+* Create Register model (device_id, location, current_user, current_shift)
+* Implement shift sign-in/sign-out with audit trail
+* Add cash drawer tracking (opening balance, transactions, closing balance)
+* Create RegisterSession model for shift accountability
+* Add register assignment to Sale documents
+* Implement drawer open/close events with logging
+
+**Why third:** Needed for multi-register stores and cashier accountability. Builds on auth foundation.
+
+### Phase 9: Payment Processing (MEDIUM PRIORITY)
+* Create Tender model (CASH, CARD, CHECK, etc.)
+* Create Payment model linked to Sales
+* Implement split payments and partial payments
+* Add change calculation and cash handling
+* Create PaymentTransaction ledger (append-only)
+* Implement payment reversal workflows
+* Add receipt generation (print/email/SMS)
+
+**Why fourth:** Sales currently have no payment mechanism. This makes the system actually usable for real transactions.
+
+### Phase 10: Returns & COGS Reversal (MEDIUM PRIORITY)
+* Create Return model (references original Sale)
+* Implement return workflows with approval requirements
+* Add COGS reversal logic (credit original sale cost, not current WAC)
+* Create RETURN transaction type for inventory ledger
+* Implement restocking fees (optional)
+* Add return authorization and tracking
+
+**Why fifth:** Common retail operation that requires careful COGS handling. Builds on Sale and Payment infrastructure.
+
+### Phase 11: Enhanced Inventory Operations (LOWER PRIORITY)
+* Add inventory states (SELLABLE, DAMAGED, IN_TRANSIT, RESERVED)
+* Implement transfer workflows between stores
+* Add cycle count and full count workflows
+* Create variance posting with approval
+* Implement lot/serial number tracking (optional)
+* Add expiration date tracking (optional)
+* Create SHRINK, SCRAP, TRANSFER transaction types
+
+**Why sixth:** Nice-to-have improvements that don't block core retail operations.
+
+### Phase 12: Concurrency Hardening (LOWER PRIORITY)
+* Add optimistic locking with version fields
+* Implement row-level locking for critical operations
+* Add transaction retry logic for deadlocks
+* Create stress tests for concurrent sales
+* Document concurrency guarantees and limitations
+
+**Why seventh:** Current implementation has basic oversell prevention. This adds enterprise-grade concurrency handling.
+
+### Phase 13: Multi-Store Infrastructure (LOWER PRIORITY)
+* Audit all queries for store_id filtering
+* Implement cross-store transfers with approval
+* Add store-level configuration and settings
+* Create store hierarchy model (optional)
+* Implement consolidated reporting across stores
+
+**Why eighth:** Most businesses start with one store. Multi-store can wait until proven at single-store scale.
+
+### Phase 14: Reporting & Analytics (LOWER PRIORITY)
+* Implement sales reports (daily, weekly, monthly)
+* Add inventory valuation reports
+* Create COGS and margin analysis
+* Implement ABC analysis for inventory
+* Add slow-moving and dead stock reports
+* Create audit trail queries and reports
+
+**Why ninth:** Critical for business insights but not blocking core operations.
+
+### Phase 15: AI Integration (LAST)
+* Implement AI audit ledger (all AI actions logged)
+* Create draft generation for receiving (invoice → draft)
+* Add reorder point suggestions with human approval
+* Implement anomaly detection for inventory and sales
+* Add natural-language Q&A with citation requirements
+* **Never allow AI to post directly to ledgers**
+
+**Why last:** AI must never be authoritative. All AI actions require human review and approval. Build this only after the system is proven correct and stable.
+
+---
+
+## 17. Known Limitations & Technical Debt
+
+* **Auth security:** Password hashing is stubbed (STUB_HASH_password)
+* **Session management:** No token-based sessions or expiration
+* **Permissions:** Roles exist but don't enforce anything
+* **Concurrency:** Basic oversell prevention only, no optimistic locking
+* **Payments:** Not implemented - sales can't be paid
+* **Returns:** Not implemented - no reversal mechanism
+* **Registers:** No device/shift tracking
+* **Multi-store:** Not tested, may have data leakage issues
+* **Receipts:** Not implemented
+* **Taxes:** Not implemented
+* **Discounts:** Not implemented
+* **Customers:** Not implemented
+* **Loyalty:** Not implemented
+
+**These are intentional.** The system is structurally correct but functionally incomplete. Build incrementally, test thoroughly, never weaken the foundation.
 
 ---
 
