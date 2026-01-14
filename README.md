@@ -440,16 +440,16 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Implemented:** Full register and shift management system. Registers track POS terminals with device IDs and locations. RegisterSessions provide cashier accountability with opening/closing cash and variance tracking. Cash drawer events (SHIFT_OPEN, SALE, NO_SALE, CASH_DROP, SHIFT_CLOSE) create immutable audit trail. Manager approval required for no-sale drawer opens and cash drops. Sales can now be linked to registers and sessions. CLI commands and REST API routes provided. 12 comprehensive tests passing.
 
-### Phase 9: Payment Processing (MEDIUM PRIORITY)
+### ✅ Phase 9: Payment Processing (COMPLETE)
 * Create Tender model (CASH, CARD, CHECK, etc.)
 * Create Payment model linked to Sales
 * Implement split payments and partial payments
 * Add change calculation and cash handling
 * Create PaymentTransaction ledger (append-only)
 * Implement payment reversal workflows
-* Add receipt generation (print/email/SMS)
+* ~~Add receipt generation (print/email/SMS)~~ (deferred)
 
-**Why fourth:** Sales currently have no payment mechanism. This makes the system actually usable for real transactions.
+**Implemented:** Full payment processing system with 5 tender types (CASH, CARD, CHECK, GIFT_CARD, STORE_CREDIT). Supports split payments (multiple payments per sale), partial payments (layaway/deposits), and automatic change calculation for cash. Payment status tracking (UNPAID, PARTIAL, PAID, OVERPAID). Payment voids with immutable audit trail via PaymentTransaction ledger. Tender summary reporting for register sessions. Sales link to payments with real-time balance tracking. REST API routes with permission-based access. 14 comprehensive tests passing. **Note:** Receipt generation deferred to future phase as it's UI-dependent.
 
 ### Phase 10: Returns & COGS Reversal (MEDIUM PRIORITY)
 * Create Return model (references original Sale)
@@ -515,7 +515,6 @@ Now that the foundational architecture is in place, here are the recommended nex
 ## 17. Known Limitations & Technical Debt
 
 * **Concurrency:** Basic oversell prevention only, no optimistic locking
-* **Payments:** Not implemented - sales can't be paid
 * **Returns:** Not implemented - no reversal mechanism
 * **Multi-store:** Not tested, may have data leakage issues
 * **Receipts:** Not implemented
