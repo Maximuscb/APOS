@@ -76,7 +76,7 @@ def main() -> None:
         description="Create a zip of the repo excluding anything matched by .gitignore."
     )
     parser.add_argument("--root", default=".", help="Project root (default: .)")
-    parser.add_argument("--out", default="repo_filtered.zip", help="Output zip filename (default: repo_filtered.zip)")
+    parser.add_argument("--out", default="APOS.zip", help="Output zip filename (default: APOS.zip)")
     parser.add_argument(
         "--include-dot-gitignore",
         action="store_true",
