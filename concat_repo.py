@@ -7,11 +7,7 @@ files, respecting .gitignore rules — EXCEPT it will ALWAYS include the APOS DB
 (even if ignored), embedding it as base64 so it can live inside a text bundle.
 
 Usage:
-  python concat_repo.py
   python concat_repo.py --out repo_bundle.txt
-  python concat_repo.py --out repo_bundle.txt --root .
-  python concat_repo.py --apos-db instance/pos.sqlite3
-  python concat_repo.py --apos-db pos.sqlite3 --apos-db instance/apos.sqlite3
 
 Notes:
   - Requires: pip install pathspec
