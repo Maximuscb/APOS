@@ -406,6 +406,59 @@ class UserRole(db.Model):
         }
 
 
+class SessionToken(db.Model):
+    """
+    Phase 6: Secure session token management.
+
+    WHY: Stateless auth tokens with timeout and revocation support.
+    Tokens are cryptographically secure random strings (32 bytes = 64 hex chars).
+
+    SECURITY NOTES:
+    - Tokens stored hashed in database (bcrypt)
+    - 24-hour absolute timeout
+    - 2-hour idle timeout
+    - Revocable on logout or suspicious activity
+    """
+    __tablename__ = "session_tokens"
+    __table_args__ = (
+        db.Index("ix_session_tokens_user_active", "user_id", "is_revoked"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+
+    # Token hash (never store plaintext tokens!)
+    token_hash = db.Column(db.String(255), nullable=False, unique=True, index=True)
+
+    # Session metadata
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    last_used_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
+
+    # Revocation support
+    is_revoked = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    revoked_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    revoked_reason = db.Column(db.String(255), nullable=True)
+
+    # Client information (for security monitoring)
+    user_agent = db.Column(db.String(512), nullable=True)
+    ip_address = db.Column(db.String(45), nullable=True)  # IPv6 max length
+
+    user = db.relationship("User", backref=db.backref("session_tokens", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "created_at": to_utc_z(self.created_at),
+            "last_used_at": to_utc_z(self.last_used_at),
+            "expires_at": to_utc_z(self.expires_at),
+            "is_revoked": self.is_revoked,
+            "revoked_at": to_utc_z(self.revoked_at) if self.revoked_at else None,
+        }
+
+
 class MasterLedgerEvent(db.Model):
     __tablename__ = "master_ledger_events"
     __table_args__ = {"sqlite_autoincrement": True}

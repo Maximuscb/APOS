@@ -1,20 +1,102 @@
 """
-Phase 4: Authentication Service
+Phase 6: Production-Ready Authentication Service
 
-WHY: Every action must be attributable. Stub implementation for now -
-production would use bcrypt, sessions, JWT, etc.
+WHY: Every action must be attributable. Uses bcrypt for secure password
+hashing and validates password strength.
+
+SECURITY NOTES:
+- Passwords hashed with bcrypt (cost factor 12)
+- Minimum 8 characters required
+- Must contain uppercase, lowercase, digit, and special char
+- Session tokens managed separately (see session_service.py)
 """
 
+import bcrypt
+import re
 from ..extensions import db
 from ..models import User, Role, UserRole
 from app.time_utils import utcnow
 
 
+class PasswordValidationError(Exception):
+    """Raised when password doesn't meet strength requirements."""
+    pass
+
+
+def validate_password_strength(password: str) -> None:
+    """
+    Validate password meets strength requirements.
+
+    Requirements:
+    - Minimum 8 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character (!@#$%^&*(),.?":{}|<>)
+
+    Raises PasswordValidationError if requirements not met.
+    """
+    if len(password) < 8:
+        raise PasswordValidationError("Password must be at least 8 characters long")
+
+    if not re.search(r'[A-Z]', password):
+        raise PasswordValidationError("Password must contain at least one uppercase letter")
+
+    if not re.search(r'[a-z]', password):
+        raise PasswordValidationError("Password must contain at least one lowercase letter")
+
+    if not re.search(r'\d', password):
+        raise PasswordValidationError("Password must contain at least one digit")
+
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        raise PasswordValidationError("Password must contain at least one special character")
+
+
+def hash_password(password: str) -> str:
+    """
+    Hash password using bcrypt with cost factor 12.
+
+    WHY: Cost factor 12 provides good security/performance balance.
+    Higher costs slow down brute force attacks but also slow down login.
+
+    Password is validated for strength before hashing.
+    """
+    validate_password_strength(password)
+    salt = bcrypt.gensalt(rounds=12)
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')  # Store as string in database
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    """
+    Verify password against bcrypt hash.
+
+    Returns True if password matches hash, False otherwise.
+    Handles both new bcrypt hashes and legacy STUB_HASH for migration.
+
+    WHY timing-safe: bcrypt.checkpw() prevents timing attacks automatically.
+    """
+    # Handle legacy stub hashes during migration period
+    if password_hash.startswith("STUB_HASH_"):
+        # Legacy stub hash - allow for backward compatibility
+        return password_hash == f"STUB_HASH_{password}"
+
+    # Production bcrypt verification
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+    except Exception:
+        return False
+
+
 def create_user(username: str, email: str, password: str, store_id: int | None = None) -> User:
     """
-    Create new user. Password hashing stubbed for now.
+    Create new user with bcrypt password hashing.
 
-    SECURITY NOTE: Production must use bcrypt.hashpw()
+    Password must meet strength requirements or PasswordValidationError will be raised.
+    Username and email must be unique or ValueError will be raised.
+
+    WHY: User creation is the entry point for authentication.
+    Must enforce password strength at creation time.
     """
     existing = db.session.query(User).filter(
         db.or_(User.username == username, User.email == email)
@@ -23,8 +105,8 @@ def create_user(username: str, email: str, password: str, store_id: int | None =
     if existing:
         raise ValueError("Username or email already exists")
 
-    # STUB: In production, use bcrypt.hashpw(password.encode(), bcrypt.gensalt())
-    password_hash = f"STUB_HASH_{password}"
+    # Hash password with bcrypt (validates strength automatically)
+    password_hash = hash_password(password)
 
     user = User(
         username=username,
@@ -40,17 +122,21 @@ def create_user(username: str, email: str, password: str, store_id: int | None =
 
 def authenticate(username: str, password: str) -> User | None:
     """
-    Authenticate user. Stub implementation.
+    Authenticate user with username and password.
 
-    SECURITY NOTE: Production must use bcrypt.checkpw()
+    Returns User if credentials valid, None otherwise.
+    Updates last_login_at timestamp on successful authentication.
+
+    WHY: Central authentication function. All login flows go through here.
+    Uses timing-safe comparison via bcrypt.
     """
     user = db.session.query(User).filter_by(username=username, is_active=True).first()
 
     if not user:
         return None
 
-    # STUB: In production, use bcrypt.checkpw(password.encode(), user.password_hash.encode())
-    if user.password_hash == f"STUB_HASH_{password}":
+    # Verify password (supports both bcrypt and legacy stub hashes)
+    if verify_password(password, user.password_hash):
         user.last_login_at = utcnow()
         db.session.commit()
         return user

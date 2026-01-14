@@ -1,6 +1,10 @@
 Test Change
 # APOS Setup & CLI Guide
 
+**Phase 6: Production-Ready Authentication**
+
+This guide covers setup, CLI commands, and security requirements for APOS.
+
 ## Quick Start
 
 ### 1. Initial Setup
@@ -36,6 +40,58 @@ Visit: **http://localhost:5173**
 
 ---
 
+## Security & Authentication (Phase 6)
+
+### Password Requirements
+
+All passwords must meet these requirements:
+- **Minimum 8 characters**
+- At least **one uppercase** letter (A-Z)
+- At least **one lowercase** letter (a-z)
+- At least **one digit** (0-9)
+- At least **one special character** (!@#$%^&*(),.?":{}|<>)
+
+Example valid passwords:
+- `Password123!`
+- `Secure@Pass1`
+- `MyP@ssw0rd`
+
+### Password Hashing
+
+- **bcrypt** with cost factor 12
+- Salt automatically generated per-password
+- Timing-safe comparison prevents attacks
+- Legacy `STUB_HASH_` passwords still supported during migration
+
+### Session Tokens
+
+- **64-character** cryptographically secure tokens
+- Tokens hashed with **SHA-256** before storage
+- **24-hour absolute timeout** (maximum session length)
+- **2-hour idle timeout** (auto-revoke if inactive)
+- Revocable on logout or security events
+- Tracks IP address and user agent for monitoring
+
+### API Authentication
+
+Protected routes require `Authorization` header:
+
+```bash
+Authorization: Bearer <token>
+```
+
+Obtain token via `POST /api/auth/login`:
+
+```bash
+curl -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "Password123!"}'
+```
+
+Response includes `token` field for subsequent requests.
+
+---
+
 ## CLI Commands
 
 ### System Initialization
@@ -52,14 +108,18 @@ Creates:
 FLASK_APP=wsgi.py python -m flask init-system
 ```
 
-**Default Credentials:**
+**Default Credentials (Phase 6):**
 ```
-admin    → admin@apos.local    / password123
-manager  → manager@apos.local  / password123
-cashier  → cashier@apos.local  / password123
+admin    → admin@apos.local    / Password123!
+manager  → manager@apos.local  / Password123!
+cashier  → cashier@apos.local  / Password123!
 ```
 
-⚠️ **SECURITY:** Change these passwords immediately in production!
+⚠️ **SECURITY WARNINGS:**
+- Passwords are now **securely hashed with bcrypt**
+- **Change all passwords immediately in production!**
+- Default passwords meet Phase 6 requirements but are publicly documented
+- Use `flask create-user` to create users with unique passwords
 
 ---
 
@@ -77,7 +137,7 @@ Creates: admin, manager, cashier roles
 ### User Management
 
 #### `flask create-user`
-**Interactive user creation**
+**Interactive user creation with password validation**
 
 ```bash
 FLASK_APP=wsgi.py python -m flask create-user
@@ -86,7 +146,7 @@ FLASK_APP=wsgi.py python -m flask create-user
 Prompts for:
 - Username
 - Email
-- Password (hidden input)
+- Password (hidden input, must meet requirements)
 - Role (admin/manager/cashier)
 
 Example:
@@ -97,6 +157,13 @@ Password: ********
 Repeat for confirmation: ********
 Role (admin, manager, cashier): manager
 ✅ Created user: john (john@example.com) with role 'manager'
+🔒 Password securely hashed with bcrypt
+```
+
+**Password validation errors:**
+```
+❌ Password validation failed: Password must be at least 8 characters long
+Requirements: 8+ chars, uppercase, lowercase, digit, special char
 ```
 
 ---
@@ -170,7 +237,41 @@ FLASK_APP=wsgi.py python -m flask list-users
 # 4. Run tests
 python Audit.py
 python LifecycleAudit.py
+python AuthenticationAudit.py
 ```
+
+---
+
+## Testing
+
+### Run All Tests
+
+```bash
+cd backend
+
+# Phase 1-3: Core inventory and COGS tests
+python Audit.py
+
+# Phase 5: Document lifecycle tests
+python LifecycleAudit.py
+
+# Phase 6: Authentication security tests
+python AuthenticationAudit.py
+```
+
+### Authentication Tests (Phase 6)
+
+`AuthenticationAudit.py` verifies:
+- Password strength validation
+- bcrypt password hashing
+- User creation with bcrypt
+- Session token generation
+- Session lifecycle (create, validate, revoke)
+- Session timeouts (absolute and idle)
+- Revoke all sessions
+- Complete login/logout flow
+
+All tests must pass before production deployment.
 
 ---
 
@@ -250,29 +351,123 @@ python LifecycleAudit.py  # Lifecycle tests
 
 ## Production Deployment
 
-**Before deploying to production:**
+### ✅ Phase 6 Security Complete
 
-1. **Change all default passwords**
-   ```bash
-   FLASK_APP=wsgi.py python -m flask create-user
-   # Create new admin with strong password
+The following are **now implemented** in Phase 6:
+- ✅ bcrypt password hashing (cost factor 12)
+- ✅ Strong password validation
+- ✅ Secure session token management
+- ✅ Session timeouts (24-hour absolute, 2-hour idle)
+- ✅ Explicit logout and revocation
+
+### 🔒 Pre-Production Security Checklist
+
+**Critical (Must Do):**
+
+- [ ] **Change all default passwords**
+  ```bash
+  # DO NOT use Password123! in production
+  FLASK_APP=wsgi.py python -m flask create-user
+  ```
+
+- [ ] **Run all tests and verify they pass**
+  ```bash
+  python Audit.py
+  python LifecycleAudit.py
+  python AuthenticationAudit.py
+  ```
+
+- [ ] **Enable HTTPS/TLS** (session tokens sent in Authorization header)
+  - Use reverse proxy (nginx, Apache) with SSL certificate
+  - Redirect all HTTP to HTTPS
+  - Set `Secure` flag on cookies if used
+
+- [ ] **Review session timeout values** (in `session_service.py`)
+  - Default: 24hr absolute, 2hr idle
+  - Adjust based on security requirements
+
+- [ ] **Set up database backups**
+  ```bash
+  # Example: Daily backup
+  0 2 * * * cp /path/to/apos.sqlite3 /backups/apos-$(date +\%Y\%m\%d).sqlite3
+  ```
+
+- [ ] **Configure production database**
+  ```bash
+  # Use PostgreSQL for production
+  export DATABASE_URL=postgresql://user:pass@localhost/apos
+  FLASK_APP=wsgi.py python -m flask db upgrade
+  ```
+
+- [ ] **Disable Flask debug mode**
+  ```bash
+  export FLASK_DEBUG=0
+  # Or remove FLASK_DEBUG variable entirely
+  ```
+
+- [ ] **Set up session cleanup cron job**
+  ```python
+  # Add to Flask CLI or cron:
+  # Daily cleanup of expired sessions (30+ days old)
+  from app.services.session_service import cleanup_expired_sessions
+  cleanup_expired_sessions()
+  ```
+
+- [ ] **Configure CORS properly** (if frontend on different domain)
+  - Whitelist only your frontend domain
+  - Do not use `*` wildcard in production
+
+**Recommended:**
+
+- [ ] **Set up monitoring and alerting**
+  - Failed login attempts
+  - Session revocations
+  - Password validation failures
+
+- [ ] **Enable rate limiting** (prevent brute force)
+  - Login endpoint: 5 attempts per minute per IP
+  - Token validation: 60 requests per minute per token
+
+- [ ] **Review and rotate secrets**
+  - Database credentials
+  - Flask SECRET_KEY
+  - API keys (if any)
+
+- [ ] **Set up audit log review process**
+  - Review `session_tokens` table for suspicious activity
+  - Monitor `revoked_reason` field for security events
+
+- [ ] **Document password change policy**
+  - Force password change every 90 days?
+  - Notify users of password resets
+
+**Future Enhancements (Phase 7+):**
+
+- [ ] Implement role-based permissions enforcement
+- [ ] Add manager override workflows
+- [ ] Implement "remember me" functionality
+- [ ] Add account lockout after N failed attempts
+- [ ] Implement password reset via email
+- [ ] Add two-factor authentication (2FA)
+
+### Migration from Phase 4 Stub Auth
+
+If you have existing users with `STUB_HASH_` passwords:
+
+1. **Legacy passwords still work** (backwards compatibility)
+2. Users can login with old passwords
+3. **Force password reset** for all users:
+   ```python
+   # In Flask shell:
+   from app.services.session_service import revoke_all_user_sessions
+   from app.models import User
+   users = User.query.all()
+   for user in users:
+       revoke_all_user_sessions(user.id, "Security upgrade - password reset required")
    ```
 
-2. **Replace stub auth with bcrypt**
-   - Update `app/services/auth_service.py`
-   - Use `bcrypt.hashpw()` for password hashing
-   - Implement proper session management
-
-3. **Use PostgreSQL instead of SQLite**
-   ```bash
-   export DATABASE_URL=postgresql://user:pass@localhost/apos
-   ```
-
-4. **Enable HTTPS/TLS**
-
-5. **Set up proper backup schedule**
-
-6. **Review all TODO/STUB comments in code**
+4. Users create new passwords meeting Phase 6 requirements
+5. New passwords automatically use bcrypt
 
 ---
 
