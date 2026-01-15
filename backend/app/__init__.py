@@ -29,6 +29,8 @@ def create_app() -> Flask:
     from .routes.registers import registers_bp  # Phase 8: Register management
     from .routes.payments import payments_bp  # Phase 9: Payment processing
     from .routes.returns import returns_bp  # Phase 10: Returns & COGS reversal
+    from .routes.transfers import transfers_bp  # Phase 11: Inter-store transfers
+    from .routes.counts import counts_bp  # Phase 11: Physical counts
 
     app.register_blueprint(system_bp)
     app.register_blueprint(products_bp)
@@ -41,6 +43,8 @@ def create_app() -> Flask:
     app.register_blueprint(registers_bp)
     app.register_blueprint(payments_bp)
     app.register_blueprint(returns_bp)
+    app.register_blueprint(transfers_bp)
+    app.register_blueprint(counts_bp)
 
     @app.after_request
     def add_cors_headers(response):
