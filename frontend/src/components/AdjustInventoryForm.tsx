@@ -9,18 +9,18 @@ type Product = {
   store_id: number;
 };
 
-const STORE_ID = 1;
-
 export function AdjustInventoryForm({
   products,
+  storeId,
   onAdjusted,
 }: {
   products: Product[];
+  storeId: number;
   onAdjusted: () => void | Promise<void>;
 }) {
   const activeProducts = useMemo(
-    () => products.filter((p) => p.store_id === STORE_ID),
-    [products]
+    () => products.filter((p) => p.store_id === storeId),
+    [products, storeId]
   );
 
   const [productId, setProductId] = useState<number | "">("");
@@ -54,7 +54,7 @@ export function AdjustInventoryForm({
       : undefined;
 
     await apiPost("/api/inventory/adjust", {
-      store_id: STORE_ID,
+      store_id: storeId,
       product_id: productId,
       quantity_delta: d,
       note: note.trim() ? note.trim() : undefined,

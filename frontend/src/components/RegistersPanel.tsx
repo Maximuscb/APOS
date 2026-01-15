@@ -31,8 +31,17 @@ type DrawerEvent = {
   occurred_at: string;
 };
 
-export function RegistersPanel({ authVersion }: { authVersion: number }) {
-  const [storeId, setStoreId] = useState(1);
+export function RegistersPanel({
+  authVersion,
+  storeId,
+  onStoreIdChange,
+  isAuthed,
+}: {
+  authVersion: number;
+  storeId: number;
+  onStoreIdChange: (next: number) => void;
+  isAuthed: boolean;
+}) {
   const [registers, setRegisters] = useState<Register[]>([]);
   const [selectedRegisterId, setSelectedRegisterId] = useState<number | "">("");
   const [registerDetail, setRegisterDetail] = useState<Register & { current_session: RegisterSession | null } | null>(
@@ -75,10 +84,15 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
   });
 
   async function loadRegisters() {
+    if (!isAuthed) {
+      setRegisters([]);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const result = await apiGet<{ registers: Register[] }>(`/api/registers?store_id=${storeId}`);
+      const query = storeId ? `?store_id=${storeId}` : "";
+      const result = await apiGet<{ registers: Register[] }>(`/api/registers${query}`);
       setRegisters(result.registers ?? []);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load registers");
@@ -88,6 +102,7 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
   }
 
   async function loadRegisterDetail(id: number) {
+    if (!isAuthed) return;
     setLoading(true);
     setError(null);
     try {
@@ -101,6 +116,7 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
   }
 
   async function loadSessions(id: number) {
+    if (!isAuthed) return;
     setLoading(true);
     setError(null);
     try {
@@ -114,6 +130,7 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
   }
 
   async function loadEvents(id: number) {
+    if (!isAuthed) return;
     setLoading(true);
     setError(null);
     try {
@@ -127,6 +144,14 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
   }
 
   async function handleCreateRegister() {
+    if (!isAuthed) {
+      setError("Login required to create a register.");
+      return;
+    }
+    if (!storeId) {
+      setError("Store ID required to create a register.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -148,6 +173,10 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
 
   async function handleOpenShift() {
     if (!openShift.register_id) return;
+    if (!isAuthed) {
+      setError("Login required to open a shift.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -168,6 +197,10 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
 
   async function handleCloseShift() {
     if (!closeShift.session_id) return;
+    if (!isAuthed) {
+      setError("Login required to close a shift.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -189,6 +222,10 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
 
   async function handleNoSale() {
     if (!noSale.session_id) return;
+    if (!isAuthed) {
+      setError("Login required to log drawer events.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -206,6 +243,10 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
 
   async function handleCashDrop() {
     if (!cashDrop.session_id) return;
+    if (!isAuthed) {
+      setError("Login required to log drawer events.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -225,7 +266,7 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
   useEffect(() => {
     loadRegisters();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeId, authVersion]);
+  }, [storeId, authVersion, isAuthed]);
 
   return (
     <div className="panel panel--full">
@@ -242,7 +283,7 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
               type="number"
               min="1"
               value={storeId}
-              onChange={(e) => setStoreId(Number(e.target.value))}
+              onChange={(e) => onStoreIdChange(Number(e.target.value))}
             />
           </div>
           <button className="btn btn--ghost" type="button" onClick={loadRegisters} disabled={loading}>
@@ -251,6 +292,7 @@ export function RegistersPanel({ authVersion }: { authVersion: number }) {
         </div>
       </div>
 
+      {!isAuthed && <div className="alert">Login required to manage registers.</div>}
       {error && <div className="alert">{error}</div>}
 
       <div className="panel__grid">

@@ -25,18 +25,18 @@ type InventorySummary = {
   recent_unit_cost_cents: number | null;
 };
 
-const STORE_ID = 1;
-
 export function ProductsTable({
   products,
   onDelete,
   onUpdate,
   asOf,
+  storeId,
 }: {
   products: Product[];
   onDelete: (id: number) => void;
   onUpdate: (id: number, patch: ProductPatch) => Promise<void> | void;
   asOf: string; // "" or ISO-like string
+  storeId: number;
 }) {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState("");
@@ -103,7 +103,7 @@ export function ProductsTable({
       for (const p of products) {
         try {
           const s = await apiGet<InventorySummary>(
-            `/api/inventory/${p.id}/summary?store_id=${STORE_ID}${qs}`
+            `/api/inventory/${p.id}/summary?store_id=${storeId}${qs}`
           );
           next[p.id] = s;
         } catch {
@@ -120,7 +120,7 @@ export function ProductsTable({
     return () => {
       cancelled = true;
     };
-  }, [products, asOfUtcIso]);
+  }, [products, asOfUtcIso, storeId]);
 
   return (
     <table style={{ width: "100%", borderCollapse: "collapse" }}>

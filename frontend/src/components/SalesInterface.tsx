@@ -1,6 +1,6 @@
 // frontend/src/components/SalesInterface.tsx
-import { useState, useEffect } from "react";
-import { apiGet, apiPost } from "../lib/api";
+import { useState } from "react";
+import { apiPost } from "../lib/api";
 
 type Product = {
   id: number;
@@ -24,7 +24,15 @@ type SaleLine = {
   line_total_cents: number;
 };
 
-export function SalesInterface({ products }: { products: Product[] }) {
+export function SalesInterface({
+  products,
+  storeId,
+  isAuthed,
+}: {
+  products: Product[];
+  storeId: number;
+  isAuthed: boolean;
+}) {
   const [currentSale, setCurrentSale] = useState<Sale | null>(null);
   const [lines, setLines] = useState<SaleLine[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
@@ -33,10 +41,14 @@ export function SalesInterface({ products }: { products: Product[] }) {
   const [loading, setLoading] = useState(false);
 
   async function createNewSale() {
+    if (!isAuthed) {
+      setError("Login required to create a sale.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const result = await apiPost<{ sale: Sale }>("/api/sales/", { store_id: 1 });
+      const result = await apiPost<{ sale: Sale }>("/api/sales/", { store_id: storeId });
       setCurrentSale(result.sale);
       setLines([]);
     } catch (e: any) {
@@ -90,7 +102,7 @@ export function SalesInterface({ products }: { products: Product[] }) {
     <div className="pos">
       <div className="pos__header">
         <div>
-          <div className="pos__eyebrow">Register 1</div>
+          <div className="pos__eyebrow">Store {storeId}</div>
           <h3>Sales Terminal</h3>
           <p className="muted">Open a sale, scan items, and post when tender is complete.</p>
         </div>
@@ -103,11 +115,13 @@ export function SalesInterface({ products }: { products: Product[] }) {
           ) : (
             <span className="chip">No active sale</span>
           )}
-          <button className="btn btn--ghost" onClick={createNewSale} disabled={loading}>
+          <button className="btn btn--ghost" onClick={createNewSale} disabled={loading || !isAuthed}>
             New sale
           </button>
         </div>
       </div>
+
+      {!isAuthed && <div className="alert">Login required to create and post sales.</div>}
 
       {error && <div className="alert">{error}</div>}
 
@@ -116,7 +130,7 @@ export function SalesInterface({ products }: { products: Product[] }) {
           <div className="pos__empty-card">
             <div className="pos__empty-title">Start a sale to unlock the register.</div>
             <p className="muted">Create a new sale, then add items and post.</p>
-            <button className="btn btn--primary" onClick={createNewSale} disabled={loading}>
+            <button className="btn btn--primary" onClick={createNewSale} disabled={loading || !isAuthed}>
               Open new sale
             </button>
           </div>
@@ -192,6 +206,9 @@ export function SalesInterface({ products }: { products: Product[] }) {
                 <span>Total due</span>
                 <span>${(total / 100).toFixed(2)}</span>
               </div>
+            </div>
+            <div className="pos__hint muted">
+              Posting a sale requires on-hand stock and a received cost basis for each item.
             </div>
             <div className="pos__actions">
               <button

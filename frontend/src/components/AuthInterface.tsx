@@ -1,6 +1,6 @@
 // frontend/src/components/AuthInterface.tsx
-import { useState } from "react";
-import { apiPost } from "../lib/api";
+import { useEffect, useState } from "react";
+import { apiPost, clearAuthToken, getAuthToken, setAuthToken } from "../lib/api";
 
 type User = {
   id: number;
@@ -9,15 +9,40 @@ type User = {
   is_active: boolean;
 };
 
-export function AuthInterface({ onAuthChange }: { onAuthChange?: () => void }) {
+export function AuthInterface({
+  onAuthChange,
+  storeId = 1,
+}: {
+  onAuthChange?: () => void;
+  storeId?: number;
+}) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem("apos_token"));
+  const [token, setToken] = useState<string | null>(() => getAuthToken());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function loadSession() {
+      if (!token || currentUser) return;
+      try {
+        const result = await apiPost<{ user: User }>("/api/auth/validate", {});
+        if (active) {
+          setCurrentUser(result.user);
+        }
+      } catch {
+        // Ignore; App-level session check handles clearing tokens.
+      }
+    }
+    loadSession();
+    return () => {
+      active = false;
+    };
+  }, [token, currentUser]);
 
   async function handleRegister() {
     setLoading(true);
@@ -27,7 +52,7 @@ export function AuthInterface({ onAuthChange }: { onAuthChange?: () => void }) {
         username,
         email,
         password,
-        store_id: 1,
+        store_id: storeId,
       });
       alert("User registered successfully!");
       setMode("login");
@@ -49,7 +74,7 @@ export function AuthInterface({ onAuthChange }: { onAuthChange?: () => void }) {
       });
       setCurrentUser(result.user);
       setToken(result.token);
-      localStorage.setItem("apos_token", result.token);
+      setAuthToken(result.token);
       setPassword("");
       onAuthChange?.();
     } catch (e: any) {
@@ -79,7 +104,7 @@ export function AuthInterface({ onAuthChange }: { onAuthChange?: () => void }) {
       setLoading(false);
       setCurrentUser(null);
       setToken(null);
-      localStorage.removeItem("apos_token");
+      clearAuthToken();
       onAuthChange?.();
     }
   }

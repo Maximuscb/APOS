@@ -9,18 +9,18 @@ type Product = {
   store_id: number;
 };
 
-const STORE_ID = 1;
-
 export function ReceiveInventoryForm({
   products,
+  storeId,
   onReceived,
 }: {
   products: Product[];
+  storeId: number;
   onReceived: () => void | Promise<void>;
 }) {
   const activeProducts = useMemo(
-    () => products.filter((p) => p.store_id === STORE_ID),
-    [products]
+    () => products.filter((p) => p.store_id === storeId),
+    [products, storeId]
   );
 
   const [productId, setProductId] = useState<number | "">("");
@@ -63,7 +63,7 @@ export function ReceiveInventoryForm({
         : undefined;
 
       await apiPost("/api/inventory/receive", {
-        store_id: STORE_ID,
+        store_id: storeId,
         product_id: productId,
         quantity_delta: q,
         unit_cost_cents,

@@ -44,13 +44,10 @@ type Props = {
   products: Product[];
   refreshToken: number;
   asOf: string; // datetime-local from App.tsx ("" or "YYYY-MM-DDTHH:mm")
+  storeId: number;
 };
 
-export function InventoryLedger({ products, refreshToken, asOf }: Props) {
-  // Minimal assumption consistent with your current single-store setup.
-  // (If you later make store selectable, we’ll thread it through properly.)
-  const STORE_ID = 1;
-
+export function InventoryLedger({ products, refreshToken, asOf, storeId }: Props) {
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const [rows, setRows] = useState<InventoryTx[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,7 +79,7 @@ export function InventoryLedger({ products, refreshToken, asOf }: Props) {
 
     try {
       const params = new URLSearchParams();
-      params.set("store_id", String(STORE_ID));
+      params.set("store_id", String(storeId));
       if (asOfUtcIso) params.set("as_of", asOfUtcIso);
 
       const suffix = `?${params.toString()}`;
@@ -100,7 +97,7 @@ export function InventoryLedger({ products, refreshToken, asOf }: Props) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProductId, asOfUtcIso, refreshToken]);
+  }, [selectedProductId, asOfUtcIso, refreshToken, storeId]);
 
   const headerStyle: React.CSSProperties = {
     display: "flex",
@@ -151,7 +148,7 @@ export function InventoryLedger({ products, refreshToken, asOf }: Props) {
         <div>
           <p style={titleStyle}>Inventory Ledger</p>
           <div style={{ fontSize: 12, color: "#666" }}>
-            Store: {STORE_ID}
+            Store: {storeId}
             {asOfUtcIso ? (
               <>
                 {" "}

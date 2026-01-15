@@ -1,5 +1,5 @@
 # backend/app/__init__.py
-from flask import Flask
+from flask import Flask, request
 
 from .config import Config
 from .extensions import db, migrate
@@ -39,6 +39,22 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(registers_bp)
     app.register_blueprint(payments_bp)
+
+    @app.after_request
+    def add_cors_headers(response):
+        origin = request.headers.get("Origin")
+        allowed_origins = {
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
+        }
+        if origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+            response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,PATCH,OPTIONS"
+        return response
 
     # Register CLI commands
     from .cli import register_commands

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
-import { apiDelete, apiGet, apiPut } from "./lib/api";
+import { apiDelete, apiGet, apiPost, apiPut, clearAuthToken, getAuthToken } from "./lib/api";
 import { AdjustInventoryForm } from "./components/AdjustInventoryForm";
 import { CreateProductForm } from "./components/CreateProductForm";
 import { InventoryLedger } from "./components/InventoryLedger";
@@ -24,6 +24,13 @@ type Product = {
   price_cents: number | null;
   is_active: boolean;
   store_id: number;
+};
+
+type User = {
+  id: number;
+  username: string;
+  email: string;
+  store_id: number | null;
 };
 
 const navItems = [
@@ -77,6 +84,9 @@ export default function App() {
   const [asOf, setAsOf] = useState<string>("");
   const [activePage, setActivePage] = useState("overview");
   const [authVersion, setAuthVersion] = useState(0);
+  const [authStatus, setAuthStatus] = useState<"unknown" | "authenticated" | "guest">("unknown");
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [storeId, setStoreId] = useState(1);
 
   async function load() {
     setErr(null);
@@ -85,12 +95,39 @@ export default function App() {
       const h = await apiGet<Health>("/health");
       setHealth(h);
 
-      const p = await apiGet<{ items: Product[]; count: number }>("/api/products");
+      const p = await apiGet<{ items: Product[]; count: number }>(
+        `/api/products?store_id=${storeId}`
+      );
       setProducts(p.items);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
     } finally {
       setLoadingProducts(false);
+    }
+  }
+
+  async function loadSession() {
+    const token = getAuthToken();
+    if (!token) {
+      setCurrentUser(null);
+      setAuthStatus("guest");
+      return;
+    }
+    try {
+      const result = await apiPost<{ user: User }>("/api/auth/validate", {});
+      setCurrentUser(result.user);
+      setAuthStatus("authenticated");
+      if (result.user?.store_id && result.user.store_id !== storeId) {
+        setStoreId(result.user.store_id);
+      }
+    } catch (e: any) {
+      if ((e?.message ?? "").toLowerCase().includes("network")) {
+        setAuthStatus("unknown");
+        return;
+      }
+      clearAuthToken();
+      setCurrentUser(null);
+      setAuthStatus("guest");
     }
   }
 
@@ -120,7 +157,12 @@ export default function App() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [storeId]);
+
+  useEffect(() => {
+    loadSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authVersion]);
 
   useEffect(() => {
     const hash = window.location.hash.replace("#", "");
@@ -200,6 +242,16 @@ export default function App() {
             <p className="muted">{pageCopy[activePage]?.description ?? pageCopy.overview.description}</p>
           </div>
           <div className="topbar__actions">
+            <div className="field">
+              <label>Store ID</label>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                value={storeId}
+                onChange={(e) => setStoreId(Number(e.target.value))}
+              />
+            </div>
             <label className="search">
               <span className="search__icon" aria-hidden="true">
                 O
@@ -207,6 +259,13 @@ export default function App() {
               <input className="search__input" placeholder="Search products or SKU" />
               <span className="search__hint">/</span>
             </label>
+            <div className="chip">
+              {authStatus === "authenticated" && currentUser
+                ? `Signed in: ${currentUser.username}`
+                : authStatus === "guest"
+                  ? "Not signed in"
+                  : "Checking session"}
+            </div>
             <button className="btn btn--ghost" type="button" onClick={load}>
               Refresh
             </button>
@@ -262,7 +321,7 @@ export default function App() {
                 {loadingProducts ? (
                   <div className="panel__placeholder">Loading product catalog...</div>
                 ) : (
-                  <SalesInterface products={products} />
+                  <SalesInterface products={products} storeId={storeId} isAuthed={authStatus === "authenticated"} />
                 )}
               </div>
               <div className="panel">
@@ -272,7 +331,7 @@ export default function App() {
                     <p className="muted">Validate staff credentials and permissions.</p>
                   </div>
                 </div>
-                <AuthInterface onAuthChange={() => setAuthVersion((n) => n + 1)} />
+                <AuthInterface onAuthChange={() => setAuthVersion((n) => n + 1)} storeId={storeId} />
               </div>
               <div className="panel">
                 <div className="panel__header">
@@ -321,6 +380,7 @@ export default function App() {
                     <div className="panel__section">
                       <ReceiveInventoryForm
                         products={products}
+                        storeId={storeId}
                         onReceived={async () => {
                           await load();
                           setInvRefreshToken((n) => n + 1);
@@ -330,6 +390,7 @@ export default function App() {
                     <div className="panel__section">
                       <AdjustInventoryForm
                         products={products}
+                        storeId={storeId}
                         onAdjusted={async () => {
                           await load();
                           setInvRefreshToken((n) => n + 1);
@@ -337,7 +398,7 @@ export default function App() {
                       />
                     </div>
                     <div className="panel__section">
-                      <LifecycleManager refreshToken={invRefreshToken} />
+                      <LifecycleManager refreshToken={invRefreshToken} storeId={storeId} />
                     </div>
                   </div>
                 )}
@@ -397,6 +458,7 @@ export default function App() {
                     <div className="panel__section">
                       <ReceiveInventoryForm
                         products={products}
+                        storeId={storeId}
                         onReceived={async () => {
                           await load();
                           setInvRefreshToken((n) => n + 1);
@@ -406,6 +468,7 @@ export default function App() {
                     <div className="panel__section">
                       <AdjustInventoryForm
                         products={products}
+                        storeId={storeId}
                         onAdjusted={async () => {
                           await load();
                           setInvRefreshToken((n) => n + 1);
@@ -413,7 +476,7 @@ export default function App() {
                       />
                     </div>
                     <div className="panel__section">
-                      <LifecycleManager refreshToken={invRefreshToken} />
+                      <LifecycleManager refreshToken={invRefreshToken} storeId={storeId} />
                     </div>
                   </div>
                 )}
@@ -428,7 +491,12 @@ export default function App() {
                     <p className="muted">Trace adjustments and receipts across the store.</p>
                   </div>
                 </div>
-                <InventoryLedger products={products} refreshToken={invRefreshToken} asOf={asOf} />
+                <InventoryLedger
+                  products={products}
+                  refreshToken={invRefreshToken}
+                  asOf={asOf}
+                  storeId={storeId}
+                />
               </div>
               <div className="panel panel--wide">
                 <div className="panel__header">
@@ -437,7 +505,7 @@ export default function App() {
                     <p className="muted">Store-wide stock movement summary.</p>
                   </div>
                 </div>
-                <MasterLedger storeId={1} refreshToken={invRefreshToken} asOf={asOf} />
+                <MasterLedger storeId={storeId} refreshToken={invRefreshToken} asOf={asOf} />
               </div>
             </section>
 
@@ -457,6 +525,7 @@ export default function App() {
                     onDelete={deleteProduct}
                     onUpdate={updateProduct}
                     asOf={asOf}
+                    storeId={storeId}
                   />
                 )}
               </div>
@@ -476,7 +545,7 @@ export default function App() {
               {loadingProducts ? (
                 <div className="panel__placeholder">Loading product catalog...</div>
               ) : (
-                <SalesInterface products={products} />
+                <SalesInterface products={products} storeId={storeId} isAuthed={authStatus === "authenticated"} />
               )}
             </div>
             <div className="panel">
@@ -493,19 +562,24 @@ export default function App() {
 
         {activePage === "registers" && (
           <section className="content-grid fade-in delay-2">
-            <RegistersPanel authVersion={authVersion} />
+            <RegistersPanel
+              authVersion={authVersion}
+              storeId={storeId}
+              onStoreIdChange={setStoreId}
+              isAuthed={authStatus === "authenticated"}
+            />
           </section>
         )}
 
         {activePage === "payments" && (
           <section className="content-grid fade-in delay-2">
-            <PaymentsPanel authVersion={authVersion} />
+            <PaymentsPanel authVersion={authVersion} isAuthed={authStatus === "authenticated"} />
           </section>
         )}
 
         {activePage === "audits" && (
           <section className="content-grid fade-in delay-2">
-            <AuditPanel authVersion={authVersion} />
+            <AuditPanel authVersion={authVersion} isAuthed={authStatus === "authenticated"} />
           </section>
         )}
 
@@ -518,7 +592,7 @@ export default function App() {
                   <p className="muted">Register users, create sessions, and initialize roles.</p>
                 </div>
               </div>
-              <AuthInterface onAuthChange={() => setAuthVersion((n) => n + 1)} />
+              <AuthInterface onAuthChange={() => setAuthVersion((n) => n + 1)} storeId={storeId} />
             </div>
           </section>
         )}

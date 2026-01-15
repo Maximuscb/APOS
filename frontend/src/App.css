@@ -490,6 +490,11 @@
   gap: 10px;
 }
 
+.pos__hint {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .pos__empty {
   display: grid;
   place-items: center;

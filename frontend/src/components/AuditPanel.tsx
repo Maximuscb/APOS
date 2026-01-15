@@ -18,7 +18,13 @@ type DrawerEvent = {
   occurred_at: string;
 };
 
-export function AuditPanel({ authVersion }: { authVersion: number }) {
+export function AuditPanel({
+  authVersion,
+  isAuthed,
+}: {
+  authVersion: number;
+  isAuthed: boolean;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -41,6 +47,10 @@ export function AuditPanel({ authVersion }: { authVersion: number }) {
   const [drawerEvents, setDrawerEvents] = useState<DrawerEvent[]>([]);
 
   async function loadPaymentTransactions() {
+    if (!isAuthed) {
+      setError("Login required to view payment transactions.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -64,6 +74,10 @@ export function AuditPanel({ authVersion }: { authVersion: number }) {
 
   async function loadDrawerEvents() {
     if (!drawerFilters.register_id) return;
+    if (!isAuthed) {
+      setError("Login required to view drawer events.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -99,6 +113,7 @@ export function AuditPanel({ authVersion }: { authVersion: number }) {
         </div>
       </div>
 
+      {!isAuthed && <div className="alert">Login required to access audit logs.</div>}
       {error && <div className="alert">{error}</div>}
 
       <div className="panel__grid">

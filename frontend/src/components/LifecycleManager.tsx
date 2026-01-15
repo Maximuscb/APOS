@@ -12,7 +12,13 @@ type Transaction = {
   occurred_at: string;
 };
 
-export function LifecycleManager({ refreshToken }: { refreshToken: number }) {
+export function LifecycleManager({
+  refreshToken,
+  storeId,
+}: {
+  refreshToken: number;
+  storeId: number;
+}) {
   const [draftTxs, setDraftTxs] = useState<Transaction[]>([]);
   const [approvedTxs, setApprovedTxs] = useState<Transaction[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -23,10 +29,10 @@ export function LifecycleManager({ refreshToken }: { refreshToken: number }) {
     setError(null);
     try {
       const drafts = await apiGet<{ transactions: Transaction[] }>(
-        "/api/lifecycle/pending?store_id=1"
+        `/api/lifecycle/pending?store_id=${storeId}`
       );
       const approved = await apiGet<{ transactions: Transaction[] }>(
-        "/api/lifecycle/approved?store_id=1"
+        `/api/lifecycle/approved?store_id=${storeId}`
       );
       setDraftTxs(drafts.transactions);
       setApprovedTxs(approved.transactions);
@@ -59,7 +65,8 @@ export function LifecycleManager({ refreshToken }: { refreshToken: number }) {
 
   useEffect(() => {
     loadTransactions();
-  }, [refreshToken]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken, storeId]);
 
   return (
     <div style={{ marginTop: 20, padding: 12, border: "1px solid #ddd" }}>

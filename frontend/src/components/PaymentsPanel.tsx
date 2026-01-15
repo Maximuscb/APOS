@@ -17,7 +17,13 @@ type PaymentSummary = {
   payment_status: string;
 };
 
-export function PaymentsPanel({ authVersion }: { authVersion: number }) {
+export function PaymentsPanel({
+  authVersion,
+  isAuthed,
+}: {
+  authVersion: number;
+  isAuthed: boolean;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saleId, setSaleId] = useState("");
@@ -45,6 +51,10 @@ export function PaymentsPanel({ authVersion }: { authVersion: number }) {
   const [tenderSessionId, setTenderSessionId] = useState("");
 
   async function addPayment() {
+    if (!isAuthed) {
+      setError("Login required to add payments.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -73,6 +83,10 @@ export function PaymentsPanel({ authVersion }: { authVersion: number }) {
 
   async function loadSalePayments() {
     if (!saleId) return;
+    if (!isAuthed) {
+      setError("Login required to view payments.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -90,6 +104,10 @@ export function PaymentsPanel({ authVersion }: { authVersion: number }) {
 
   async function voidPayment() {
     if (!voidForm.payment_id) return;
+    if (!isAuthed) {
+      setError("Login required to void payments.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -108,6 +126,10 @@ export function PaymentsPanel({ authVersion }: { authVersion: number }) {
 
   async function loadTenderSummary() {
     if (!tenderSessionId) return;
+    if (!isAuthed) {
+      setError("Login required to view tender summaries.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -137,6 +159,7 @@ export function PaymentsPanel({ authVersion }: { authVersion: number }) {
         </div>
       </div>
 
+      {!isAuthed && <div className="alert">Login required for payment operations.</div>}
       {error && <div className="alert">{error}</div>}
 
       <div className="panel__grid">
