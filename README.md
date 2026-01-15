@@ -451,15 +451,17 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Implemented:** Full payment processing system with 5 tender types (CASH, CARD, CHECK, GIFT_CARD, STORE_CREDIT). Supports split payments (multiple payments per sale), partial payments (layaway/deposits), and automatic change calculation for cash. Payment status tracking (UNPAID, PARTIAL, PAID, OVERPAID). Payment voids with immutable audit trail via PaymentTransaction ledger. Tender summary reporting for register sessions. Sales link to payments with real-time balance tracking. REST API routes with permission-based access. 14 comprehensive tests passing. **Note:** Receipt generation deferred to future phase as it's UI-dependent.
 
-### Phase 10: Returns & COGS Reversal (MEDIUM PRIORITY)
-* Create Return model (references original Sale)
-* Implement return workflows with approval requirements
-* Add COGS reversal logic (credit original sale cost, not current WAC)
-* Create RETURN transaction type for inventory ledger
-* Implement restocking fees (optional)
-* Add return authorization and tracking
+### ✅ Phase 10: Returns & COGS Reversal (COMPLETE)
+* ✅ Create Return and ReturnLine models (PENDING → APPROVED → COMPLETED/REJECTED lifecycle)
+* ✅ Implement return workflows with manager approval requirements
+* ✅ Add COGS reversal logic (credits original `unit_cost_cents_at_sale`, NOT current WAC)
+* ✅ Create RETURN transaction type for inventory ledger (positive quantity_delta)
+* ✅ Implement restocking fees (optional, deducted from refund)
+* ✅ Add return authorization and tracking with full audit trail
+* ✅ Quantity validation (prevent over-returning)
+* ✅ API routes with permission-based access (PROCESS_RETURN, APPROVE_DOCUMENTS, POST_DOCUMENTS)
 
-**Why fifth:** Common retail operation that requires careful COGS handling. Builds on Sale and Payment infrastructure.
+**Implemented:** Complete return processing system with critical COGS reversal logic. When items are returned, inventory is restored with RETURN transactions (positive quantity_delta), and COGS is reversed by crediting the ORIGINAL sale cost (unit_cost_cents_at_sale) rather than current WAC. This ensures accurate profit/loss accounting even when costs change over time. Returns follow manager approval workflow (PENDING → APPROVED → COMPLETED) with full user attribution. Supports optional restocking fees. Quantity validation prevents returning more than originally purchased. Return lines reference original SaleLine for complete traceability. REST API with 8 endpoints and permission enforcement. Migration applied successfully.
 
 ### Phase 11: Enhanced Inventory Operations (LOWER PRIORITY)
 * Add inventory states (SELLABLE, DAMAGED, IN_TRANSIT, RESERVED)
@@ -515,7 +517,6 @@ Now that the foundational architecture is in place, here are the recommended nex
 ## 17. Known Limitations & Technical Debt
 
 * **Concurrency:** Basic oversell prevention only, no optimistic locking
-* **Returns:** Not implemented - no reversal mechanism
 * **Multi-store:** Not tested, may have data leakage issues
 * **Receipts:** Not implemented
 * **Taxes:** Not implemented

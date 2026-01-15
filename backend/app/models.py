@@ -649,6 +649,162 @@ class PaymentTransaction(db.Model):
         }
 
 
+class Return(db.Model):
+    """
+    Phase 10: Product return document.
+
+    WHY: Retail returns are common and require careful COGS handling.
+    Must credit the ORIGINAL sale cost, not current WAC, for accurate accounting.
+
+    LIFECYCLE:
+    1. PENDING: Return created, awaiting manager approval
+    2. APPROVED: Manager approved, ready to process
+    3. COMPLETED: Return processed, inventory restored, refund issued
+    4. REJECTED: Manager rejected return request
+
+    DESIGN PRINCIPLES:
+    - Returns reference original Sale for traceability
+    - ReturnLines reference original SaleLines to track which items
+    - COGS reversal uses original sale cost (from inventory_transaction)
+    - Restocking fee optional (deducted from refund)
+    - Manager approval required before processing
+    """
+    __tablename__ = "returns"
+    __table_args__ = (
+        db.UniqueConstraint("store_id", "document_number", name="uq_returns_store_docnum"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
+
+    # Human-readable document number (e.g., "R-001234")
+    document_number = db.Column(db.String(64), nullable=False)
+
+    # Reference to original sale
+    original_sale_id = db.Column(db.Integer, db.ForeignKey("sales.id"), nullable=False, index=True)
+
+    # Return status
+    status = db.Column(db.String(16), nullable=False, default="PENDING", index=True)  # PENDING, APPROVED, COMPLETED, REJECTED
+
+    # Return reason (customer explanation)
+    reason = db.Column(db.Text, nullable=True)
+
+    # Restocking fee (in cents, deducted from refund)
+    restocking_fee_cents = db.Column(db.Integer, nullable=False, default=0)
+
+    # Refund amount (calculated from returned items minus restocking fee)
+    refund_amount_cents = db.Column(db.Integer, nullable=True)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), index=True)
+    approved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    rejected_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # User attribution
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    approved_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    completed_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    rejected_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    # Rejection reason (manager explanation)
+    rejection_reason = db.Column(db.Text, nullable=True)
+
+    # Phase 8: Register tracking
+    register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=True, index=True)
+    register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
+
+    store = db.relationship("Store", backref=db.backref("returns", lazy=True))
+    original_sale = db.relationship("Sale", backref=db.backref("returns", lazy=True))
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id], backref=db.backref("returns_created", lazy=True))
+    approved_by = db.relationship("User", foreign_keys=[approved_by_user_id], backref=db.backref("returns_approved", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "store_id": self.store_id,
+            "document_number": self.document_number,
+            "original_sale_id": self.original_sale_id,
+            "status": self.status,
+            "reason": self.reason,
+            "restocking_fee_cents": self.restocking_fee_cents,
+            "refund_amount_cents": self.refund_amount_cents,
+            "created_at": to_utc_z(self.created_at),
+            "approved_at": to_utc_z(self.approved_at) if self.approved_at else None,
+            "completed_at": to_utc_z(self.completed_at) if self.completed_at else None,
+            "rejected_at": to_utc_z(self.rejected_at) if self.rejected_at else None,
+            "created_by_user_id": self.created_by_user_id,
+            "approved_by_user_id": self.approved_by_user_id,
+            "completed_by_user_id": self.completed_by_user_id,
+            "rejected_by_user_id": self.rejected_by_user_id,
+            "rejection_reason": self.rejection_reason,
+            "register_id": self.register_id,
+            "register_session_id": self.register_session_id,
+        }
+
+
+class ReturnLine(db.Model):
+    """
+    Phase 10: Individual line items on a return document.
+
+    WHY: Track which specific items from the original sale are being returned.
+    Links to original SaleLine for COGS reversal.
+
+    CRITICAL: For COGS reversal, we credit the ORIGINAL sale cost
+    (from the inventory_transaction created when the sale was posted),
+    NOT the current weighted average cost.
+    """
+    __tablename__ = "return_lines"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+    return_id = db.Column(db.Integer, db.ForeignKey("returns.id"), nullable=False, index=True)
+
+    # Reference to original sale line being returned
+    original_sale_line_id = db.Column(db.Integer, db.ForeignKey("sale_lines.id"), nullable=False, index=True)
+
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+
+    # Quantity being returned (must be <= original quantity sold)
+    quantity = db.Column(db.Integer, nullable=False)
+
+    # Original unit price from sale (for refund calculation)
+    unit_price_cents = db.Column(db.Integer, nullable=False)
+
+    # Refund for this line (quantity * unit_price_cents)
+    line_refund_cents = db.Column(db.Integer, nullable=False)
+
+    # CRITICAL: Original COGS from sale transaction (for reversal)
+    # This comes from the inventory_transaction created when sale was posted
+    original_unit_cost_cents = db.Column(db.Integer, nullable=True)
+    original_cogs_cents = db.Column(db.Integer, nullable=True)
+
+    # Links to inventory transaction (when return is completed)
+    inventory_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    return_doc = db.relationship("Return", backref=db.backref("lines", lazy=True))
+    original_sale_line = db.relationship("SaleLine", backref=db.backref("return_lines", lazy=True))
+    product = db.relationship("Product")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "return_id": self.return_id,
+            "original_sale_line_id": self.original_sale_line_id,
+            "product_id": self.product_id,
+            "quantity": self.quantity,
+            "unit_price_cents": self.unit_price_cents,
+            "line_refund_cents": self.line_refund_cents,
+            "original_unit_cost_cents": self.original_unit_cost_cents,
+            "original_cogs_cents": self.original_cogs_cents,
+            "inventory_transaction_id": self.inventory_transaction_id,
+            "created_at": to_utc_z(self.created_at),
+        }
+
+
 class User(db.Model):
     """
     Phase 4: User accounts for authentication and attribution.
