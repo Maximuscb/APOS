@@ -121,6 +121,24 @@ PERMISSION_DEFINITIONS = [
         "Post documents to ledger (APPROVED → POSTED)",
         PermissionCategory.DOCUMENTS
     ),
+    (
+        "VIEW_DOCUMENTS",
+        "View Documents",
+        "View documents and their details",
+        PermissionCategory.DOCUMENTS
+    ),
+    (
+        "CREATE_TRANSFERS",
+        "Create Transfers",
+        "Create inter-store transfer documents",
+        PermissionCategory.DOCUMENTS
+    ),
+    (
+        "CREATE_COUNTS",
+        "Create Counts",
+        "Create physical inventory count documents",
+        PermissionCategory.DOCUMENTS
+    ),
 
     # USER MANAGEMENT PERMISSIONS
     (
@@ -214,6 +232,9 @@ DEFAULT_ROLE_PERMISSIONS = {
         "VIEW_SALES_REPORTS",
         "APPROVE_DOCUMENTS",
         "POST_DOCUMENTS",
+        "VIEW_DOCUMENTS",
+        "CREATE_TRANSFERS",
+        "CREATE_COUNTS",
         "VIEW_USERS",
         "CREATE_USER",
         "EDIT_USER",
@@ -242,6 +263,9 @@ DEFAULT_ROLE_PERMISSIONS = {
         "VIEW_SALES_REPORTS",
         "APPROVE_DOCUMENTS",
         "POST_DOCUMENTS",
+        "VIEW_DOCUMENTS",
+        "CREATE_TRANSFERS",
+        "CREATE_COUNTS",
         "VIEW_USERS",
         "CREATE_USER",  # Manager can create cashier accounts
         "EDIT_USER",

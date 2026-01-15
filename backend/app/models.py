@@ -156,6 +156,27 @@ class InventoryTransaction(db.Model):
     posted_by_user_id = db.Column(db.Integer, nullable=True)
     posted_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
+    # ==================================================================================
+    # Phase 11: Inventory State Tracking
+    # ==================================================================================
+    # WHY: Track different inventory states (SELLABLE, DAMAGED, IN_TRANSIT, RESERVED)
+    # to provide better visibility and control over inventory disposition.
+    #
+    # State meanings:
+    # - SELLABLE: Available for sale (default)
+    # - DAMAGED: Damaged goods, not sellable
+    # - IN_TRANSIT: Being transferred between locations
+    # - RESERVED: Reserved for customer orders/holds
+    #
+    # Default: SELLABLE (backwards compatibility with existing transactions)
+    # ==================================================================================
+
+    inventory_state = db.Column(
+        db.String(16),
+        nullable=False,
+        default="SELLABLE",
+        index=True,  # Frequently filtered in queries
+    )
 
     __table_args__ = (
         db.Index("ix_invtx_store_product_occurred", "store_id", "product_id", "occurred_at"),
@@ -187,6 +208,8 @@ class InventoryTransaction(db.Model):
             "approved_at": to_utc_z(self.approved_at) if self.approved_at else None,
             "posted_by_user_id": self.posted_by_user_id,
             "posted_at": to_utc_z(self.posted_at) if self.posted_at else None,
+            # Phase 11: Inventory state
+            "inventory_state": self.inventory_state,
         }
 
 class ProductIdentifier(db.Model):
@@ -800,6 +823,265 @@ class ReturnLine(db.Model):
             "line_refund_cents": self.line_refund_cents,
             "original_unit_cost_cents": self.original_unit_cost_cents,
             "original_cogs_cents": self.original_cogs_cents,
+            "inventory_transaction_id": self.inventory_transaction_id,
+            "created_at": to_utc_z(self.created_at),
+        }
+
+
+class Transfer(db.Model):
+    """
+    Phase 11: Inter-store inventory transfer document.
+
+    LIFECYCLE:
+    1. PENDING: Transfer created, awaiting manager approval
+    2. APPROVED: Manager approved, ready to ship
+    3. IN_TRANSIT: Shipped from source, not yet received
+    4. RECEIVED: Received at destination, inventory updated
+    5. CANCELLED: Transfer cancelled before shipping
+
+    WHY: Enables moving inventory between stores with proper approval,
+    tracking, and accountability. Creates TRANSFER transactions at both
+    source (negative, state=IN_TRANSIT) and destination (positive,
+    state=SELLABLE when received).
+    """
+    __tablename__ = "transfers"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Source and destination stores
+    from_store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
+    to_store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
+
+    # Document number (e.g., "T-000001")
+    document_number = db.Column(db.String(64), nullable=False, unique=True)
+
+    # PENDING, APPROVED, IN_TRANSIT, RECEIVED, CANCELLED
+    status = db.Column(db.String(16), nullable=False, default="PENDING", index=True)
+
+    # Reason for transfer
+    reason = db.Column(db.Text, nullable=True)
+
+    # User attribution for accountability
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    approved_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    shipped_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    received_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    cancelled_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    # Timestamps for each lifecycle stage
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    approved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    shipped_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    received_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    cancelled_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Cancellation reason
+    cancellation_reason = db.Column(db.Text, nullable=True)
+
+    from_store = db.relationship("Store", foreign_keys=[from_store_id])
+    to_store = db.relationship("Store", foreign_keys=[to_store_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
+    shipped_by = db.relationship("User", foreign_keys=[shipped_by_user_id])
+    received_by = db.relationship("User", foreign_keys=[received_by_user_id])
+    cancelled_by = db.relationship("User", foreign_keys=[cancelled_by_user_id])
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "from_store_id": self.from_store_id,
+            "to_store_id": self.to_store_id,
+            "document_number": self.document_number,
+            "status": self.status,
+            "reason": self.reason,
+            "created_by_user_id": self.created_by_user_id,
+            "approved_by_user_id": self.approved_by_user_id,
+            "shipped_by_user_id": self.shipped_by_user_id,
+            "received_by_user_id": self.received_by_user_id,
+            "cancelled_by_user_id": self.cancelled_by_user_id,
+            "created_at": to_utc_z(self.created_at),
+            "approved_at": to_utc_z(self.approved_at) if self.approved_at else None,
+            "shipped_at": to_utc_z(self.shipped_at) if self.shipped_at else None,
+            "received_at": to_utc_z(self.received_at) if self.received_at else None,
+            "cancelled_at": to_utc_z(self.cancelled_at) if self.cancelled_at else None,
+            "cancellation_reason": self.cancellation_reason,
+        }
+
+
+class TransferLine(db.Model):
+    """
+    Phase 11: Individual line items on a transfer document.
+
+    WHY: Track which specific products and quantities are being transferred.
+    Links to inventory transactions at source and destination stores.
+    """
+    __tablename__ = "transfer_lines"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+    transfer_id = db.Column(db.Integer, db.ForeignKey("transfers.id"), nullable=False, index=True)
+
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+
+    # Quantity being transferred
+    quantity = db.Column(db.Integer, nullable=False)
+
+    # Links to inventory transactions (created when shipped and received)
+    # out_transaction_id: negative TRANSFER at source store (inventory_state=IN_TRANSIT)
+    # in_transaction_id: positive TRANSFER at destination store (inventory_state=SELLABLE)
+    out_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
+    in_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    transfer = db.relationship("Transfer", backref=db.backref("lines", lazy=True))
+    product = db.relationship("Product")
+    out_transaction = db.relationship("InventoryTransaction", foreign_keys=[out_transaction_id])
+    in_transaction = db.relationship("InventoryTransaction", foreign_keys=[in_transaction_id])
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "transfer_id": self.transfer_id,
+            "product_id": self.product_id,
+            "quantity": self.quantity,
+            "out_transaction_id": self.out_transaction_id,
+            "in_transaction_id": self.in_transaction_id,
+            "created_at": to_utc_z(self.created_at),
+        }
+
+
+class Count(db.Model):
+    """
+    Phase 11: Physical inventory count document (cycle count or full count).
+
+    LIFECYCLE:
+    1. PENDING: Count created, lines being entered
+    2. APPROVED: Manager approved, ready to post variances
+    3. POSTED: Variances posted to inventory ledger
+    4. CANCELLED: Count cancelled before posting
+
+    WHY: Regular physical counts ensure inventory accuracy. Variances
+    between expected (system) and actual (counted) quantities are posted
+    as ADJUST transactions. Manager approval required before posting
+    ensures review of significant discrepancies.
+    """
+    __tablename__ = "counts"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
+
+    # Document number (e.g., "C-000001")
+    document_number = db.Column(db.String(64), nullable=False, unique=True)
+
+    # CYCLE (subset of products) or FULL (all products)
+    count_type = db.Column(db.String(16), nullable=False, index=True)
+
+    # PENDING, APPROVED, POSTED, CANCELLED
+    status = db.Column(db.String(16), nullable=False, default="PENDING", index=True)
+
+    # Reason/notes
+    reason = db.Column(db.Text, nullable=True)
+
+    # Total variance (sum of all line variances)
+    total_variance_units = db.Column(db.Integer, nullable=True)
+    total_variance_cost_cents = db.Column(db.Integer, nullable=True)
+
+    # User attribution for accountability
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    approved_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    posted_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    cancelled_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    # Timestamps for each lifecycle stage
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    approved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    posted_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    cancelled_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Cancellation reason
+    cancellation_reason = db.Column(db.Text, nullable=True)
+
+    store = db.relationship("Store")
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
+    posted_by = db.relationship("User", foreign_keys=[posted_by_user_id])
+    cancelled_by = db.relationship("User", foreign_keys=[cancelled_by_user_id])
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "store_id": self.store_id,
+            "document_number": self.document_number,
+            "count_type": self.count_type,
+            "status": self.status,
+            "reason": self.reason,
+            "total_variance_units": self.total_variance_units,
+            "total_variance_cost_cents": self.total_variance_cost_cents,
+            "created_by_user_id": self.created_by_user_id,
+            "approved_by_user_id": self.approved_by_user_id,
+            "posted_by_user_id": self.posted_by_user_id,
+            "cancelled_by_user_id": self.cancelled_by_user_id,
+            "created_at": to_utc_z(self.created_at),
+            "approved_at": to_utc_z(self.approved_at) if self.approved_at else None,
+            "posted_at": to_utc_z(self.posted_at) if self.posted_at else None,
+            "cancelled_at": to_utc_z(self.cancelled_at) if self.cancelled_at else None,
+            "cancellation_reason": self.cancellation_reason,
+        }
+
+
+class CountLine(db.Model):
+    """
+    Phase 11: Individual line items on a count document.
+
+    WHY: Track expected vs. actual quantities for each product.
+    Variance (actual - expected) is posted as ADJUST transaction.
+    """
+    __tablename__ = "count_lines"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+    count_id = db.Column(db.Integer, db.ForeignKey("counts.id"), nullable=False, index=True)
+
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+
+    # Expected quantity (from system)
+    expected_quantity = db.Column(db.Integer, nullable=False)
+
+    # Actual quantity (physically counted)
+    actual_quantity = db.Column(db.Integer, nullable=False)
+
+    # Variance (actual - expected)
+    variance_quantity = db.Column(db.Integer, nullable=False)
+
+    # WAC at time of count (for variance cost calculation)
+    unit_cost_cents = db.Column(db.Integer, nullable=True)
+
+    # Variance cost (variance_quantity * unit_cost_cents)
+    variance_cost_cents = db.Column(db.Integer, nullable=True)
+
+    # Link to inventory transaction (created when count is posted)
+    inventory_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    count = db.relationship("Count", backref=db.backref("lines", lazy=True))
+    product = db.relationship("Product")
+    inventory_transaction = db.relationship("InventoryTransaction")
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "count_id": self.count_id,
+            "product_id": self.product_id,
+            "expected_quantity": self.expected_quantity,
+            "actual_quantity": self.actual_quantity,
+            "variance_quantity": self.variance_quantity,
+            "unit_cost_cents": self.unit_cost_cents,
+            "variance_cost_cents": self.variance_cost_cents,
             "inventory_transaction_id": self.inventory_transaction_id,
             "created_at": to_utc_z(self.created_at),
         }

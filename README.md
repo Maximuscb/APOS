@@ -464,16 +464,17 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Implemented:** Complete return processing system with critical COGS reversal logic. When items are returned, inventory is restored with RETURN transactions (positive quantity_delta), and COGS is reversed by crediting the ORIGINAL sale cost (unit_cost_cents_at_sale) rather than current WAC. This ensures accurate profit/loss accounting even when costs change over time. Returns follow manager approval workflow (PENDING → APPROVED → COMPLETED) with full user attribution. Supports optional restocking fees. Quantity validation prevents returning more than originally purchased. Return lines reference original SaleLine for complete traceability. REST API with 8 endpoints and permission enforcement. Migration applied successfully.
 
-### Phase 11: Enhanced Inventory Operations (LOWER PRIORITY)
-* Add inventory states (SELLABLE, DAMAGED, IN_TRANSIT, RESERVED)
-* Implement transfer workflows between stores
-* Add cycle count and full count workflows
-* Create variance posting with approval
-* Implement lot/serial number tracking (optional)
-* Add expiration date tracking (optional)
-* Create SHRINK, SCRAP, TRANSFER transaction types
+### ✅ Phase 11: Enhanced Inventory Operations (COMPLETE)
+* ✅ Add inventory states (SELLABLE, DAMAGED, IN_TRANSIT, RESERVED) to InventoryTransaction
+* ✅ Implement transfer workflows between stores (PENDING → APPROVED → IN_TRANSIT → RECEIVED)
+* ✅ Add cycle count and full count workflows (PENDING → APPROVED → POSTED)
+* ✅ Create variance posting with approval (manager review required)
+* ✅ Create TRANSFER transaction type (inter-store movements)
+* ⏸️ Lot/serial number tracking (deferred - not required for MVP)
+* ⏸️ Expiration date tracking (deferred - not required for MVP)
+* ⏸️ SHRINK, SCRAP transaction types (deferred - can use ADJUST)
 
-**Why sixth:** Nice-to-have improvements that don't block core retail operations.
+**Implemented:** Complete inventory state tracking with four states (SELLABLE, DAMAGED, IN_TRANSIT, RESERVED) on all inventory transactions. Inter-store transfer system with full approval workflow (PENDING → APPROVED → IN_TRANSIT → RECEIVED), creating negative TRANSFER transactions at source (inventory_state=IN_TRANSIT) and positive at destination (inventory_state=SELLABLE). Physical count system supporting both CYCLE and FULL counts with automatic variance calculation, manager approval, and ADJUST transaction posting. Transfer and count documents follow same lifecycle pattern as other documents with full user attribution and timestamps. API routes with permission-based access (CREATE_TRANSFERS, CREATE_COUNTS, APPROVE_DOCUMENTS, POST_DOCUMENTS, VIEW_DOCUMENTS). Lot/serial tracking and expiration dates deferred as not required for core operations - can use existing ADJUST transactions for shrink/scrap scenarios. Migration applied successfully.
 
 ### Phase 12: Concurrency Hardening (LOWER PRIORITY)
 * Add optimistic locking with version fields
