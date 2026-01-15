@@ -192,6 +192,18 @@ PERMISSION_DEFINITIONS = [
         PermissionCategory.SYSTEM
     ),
     (
+        "VIEW_STORES",
+        "View Stores",
+        "View store details and hierarchy",
+        PermissionCategory.SYSTEM
+    ),
+    (
+        "MANAGE_STORES",
+        "Manage Stores",
+        "Create and update stores and store configuration",
+        PermissionCategory.SYSTEM
+    ),
+    (
         "MANAGE_PERMISSIONS",
         "Manage Permissions",
         "Grant/revoke permissions (admin only)",
@@ -243,6 +255,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "MANAGE_PRODUCTS",
         "MANAGE_IDENTIFIERS",
         "VIEW_AUDIT_LOG",
+        "VIEW_STORES",
+        "MANAGE_STORES",
         "MANAGE_PERMISSIONS",
         "SYSTEM_ADMIN",
     ],
@@ -272,6 +286,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "MANAGE_PRODUCTS",
         "MANAGE_IDENTIFIERS",
         "VIEW_AUDIT_LOG",
+        "VIEW_STORES",
+        "MANAGE_STORES",
     ],
 
     "cashier": [

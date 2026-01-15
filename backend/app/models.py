@@ -14,11 +14,18 @@ class Store(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False, unique=True)
+    code = db.Column(db.String(32), nullable=True, unique=True, index=True)
+    parent_store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=True, index=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
         server_default=db.func.now(),
     )
+
+    parent_store = db.relationship("Store", remote_side=[id], backref=db.backref("child_stores", lazy=True))
+
+    __mapper_args__ = {"version_id_col": version_id}
 
     def __repr__(self) -> str:
         return f"<Store id={self.id} name={self.name!r}>"
@@ -27,7 +34,48 @@ class Store(db.Model):
         return {
             "id": self.id,
             "name": self.name,
+            "code": self.code,
+            "parent_store_id": self.parent_store_id,
+            "version_id": self.version_id,
             "created_at": to_utc_z(self.created_at),
+        }
+
+
+class StoreConfig(db.Model):
+    """
+    Phase 13: Store-level configuration settings.
+
+    WHY: Each store may need localized settings (hours, contact info,
+    default inventory state, etc.) without hardcoding per-deployment values.
+    """
+    __tablename__ = "store_configs"
+    __table_args__ = (
+        db.UniqueConstraint("store_id", "key", name="uq_store_configs_store_key"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
+    key = db.Column(db.String(128), nullable=False)
+    value = db.Column(db.Text, nullable=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
+
+    store = db.relationship("Store", backref=db.backref("configs", lazy=True))
+
+    __mapper_args__ = {"version_id_col": version_id}
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "store_id": self.store_id,
+            "key": self.key,
+            "value": self.value,
+            "version_id": self.version_id,
+            "created_at": to_utc_z(self.created_at),
+            "updated_at": to_utc_z(self.updated_at),
         }
 
 class Product(db.Model):
@@ -53,6 +101,7 @@ class Product(db.Model):
     price_cents = db.Column(db.Integer, nullable=True)
 
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
     updated_at = db.Column(
@@ -63,6 +112,7 @@ class Product(db.Model):
     )
 
     store = db.relationship("Store", backref=db.backref("products", lazy=True))
+    __mapper_args__ = {"version_id_col": version_id}
 
     def __repr__(self) -> str:
         return f"<Product id={self.id} sku={self.sku!r} name={self.name!r} store_id={self.store_id}>"
@@ -76,6 +126,7 @@ class Product(db.Model):
             "description": self.description,
             "price_cents": self.price_cents,
             "is_active": self.is_active,
+            "version_id": self.version_id,
             "created_at": to_utc_z(self.created_at),
             "updated_at": to_utc_z(self.updated_at),
         }
@@ -305,8 +356,10 @@ class Sale(db.Model):
     total_due_cents = db.Column(db.Integer, nullable=True)  # Calculated from sale lines
     total_paid_cents = db.Column(db.Integer, nullable=False, default=0)  # Sum of completed payments
     change_due_cents = db.Column(db.Integer, nullable=False, default=0)  # For overpayment
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     store = db.relationship("Store", backref=db.backref("sales", lazy=True))
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -323,6 +376,7 @@ class Sale(db.Model):
             "total_due_cents": self.total_due_cents,
             "total_paid_cents": self.total_paid_cents,
             "change_due_cents": self.change_due_cents,
+            "version_id": self.version_id,
         }
 
 
@@ -341,11 +395,13 @@ class SaleLine(db.Model):
 
     # Links to inventory transaction (when posted)
     inventory_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
 
     sale = db.relationship("Sale", backref=db.backref("lines", lazy=True))
     product = db.relationship("Product")
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -356,6 +412,7 @@ class SaleLine(db.Model):
             "unit_price_cents": self.unit_price_cents,
             "line_total_cents": self.line_total_cents,
             "inventory_transaction_id": self.inventory_transaction_id,
+            "version_id": self.version_id,
             "created_at": to_utc_z(self.created_at),
         }
 
@@ -389,11 +446,13 @@ class Register(db.Model):
     device_id = db.Column(db.String(128), nullable=True)  # MAC address, serial, etc.
 
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
 
     store = db.relationship("Store", backref=db.backref("registers", lazy=True))
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -404,6 +463,7 @@ class Register(db.Model):
             "location": self.location,
             "device_id": self.device_id,
             "is_active": self.is_active,
+            "version_id": self.version_id,
             "created_at": to_utc_z(self.created_at),
             "updated_at": to_utc_z(self.updated_at),
         }
@@ -446,9 +506,11 @@ class RegisterSession(db.Model):
 
     # Closing notes
     notes = db.Column(db.Text, nullable=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     register = db.relationship("Register", backref=db.backref("sessions", lazy=True))
     user = db.relationship("User", backref=db.backref("register_sessions", lazy=True))
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -463,6 +525,7 @@ class RegisterSession(db.Model):
             "opened_at": to_utc_z(self.opened_at),
             "closed_at": to_utc_z(self.closed_at) if self.closed_at else None,
             "notes": self.notes,
+            "version_id": self.version_id,
         }
 
 
@@ -580,10 +643,12 @@ class Payment(db.Model):
     # Phase 8: Register tracking
     register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=True, index=True)
     register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     sale = db.relationship("Sale", backref=db.backref("payments", lazy=True))
     created_by = db.relationship("User", foreign_keys=[created_by_user_id], backref=db.backref("payments_created", lazy=True))
     voided_by = db.relationship("User", foreign_keys=[voided_by_user_id], backref=db.backref("payments_voided", lazy=True))
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -601,6 +666,7 @@ class Payment(db.Model):
             "void_reason": self.void_reason,
             "register_id": self.register_id,
             "register_session_id": self.register_session_id,
+            "version_id": self.version_id,
         }
 
 
@@ -737,11 +803,13 @@ class Return(db.Model):
     # Phase 8: Register tracking
     register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=True, index=True)
     register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     store = db.relationship("Store", backref=db.backref("returns", lazy=True))
     original_sale = db.relationship("Sale", backref=db.backref("returns", lazy=True))
     created_by = db.relationship("User", foreign_keys=[created_by_user_id], backref=db.backref("returns_created", lazy=True))
     approved_by = db.relationship("User", foreign_keys=[approved_by_user_id], backref=db.backref("returns_approved", lazy=True))
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -764,6 +832,7 @@ class Return(db.Model):
             "rejection_reason": self.rejection_reason,
             "register_id": self.register_id,
             "register_session_id": self.register_session_id,
+            "version_id": self.version_id,
         }
 
 
@@ -805,12 +874,14 @@ class ReturnLine(db.Model):
 
     # Links to inventory transaction (when return is completed)
     inventory_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
 
     return_doc = db.relationship("Return", backref=db.backref("lines", lazy=True))
     original_sale_line = db.relationship("SaleLine", backref=db.backref("return_lines", lazy=True))
     product = db.relationship("Product")
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -824,6 +895,7 @@ class ReturnLine(db.Model):
             "original_unit_cost_cents": self.original_unit_cost_cents,
             "original_cogs_cents": self.original_cogs_cents,
             "inventory_transaction_id": self.inventory_transaction_id,
+            "version_id": self.version_id,
             "created_at": to_utc_z(self.created_at),
         }
 
@@ -878,9 +950,11 @@ class Transfer(db.Model):
 
     # Cancellation reason
     cancellation_reason = db.Column(db.Text, nullable=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     from_store = db.relationship("Store", foreign_keys=[from_store_id])
     to_store = db.relationship("Store", foreign_keys=[to_store_id])
+    __mapper_args__ = {"version_id_col": version_id}
     created_by = db.relationship("User", foreign_keys=[created_by_user_id])
     approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
     shipped_by = db.relationship("User", foreign_keys=[shipped_by_user_id])
@@ -906,6 +980,7 @@ class Transfer(db.Model):
             "received_at": to_utc_z(self.received_at) if self.received_at else None,
             "cancelled_at": to_utc_z(self.cancelled_at) if self.cancelled_at else None,
             "cancellation_reason": self.cancellation_reason,
+            "version_id": self.version_id,
         }
 
 
@@ -932,6 +1007,7 @@ class TransferLine(db.Model):
     # in_transaction_id: positive TRANSFER at destination store (inventory_state=SELLABLE)
     out_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
     in_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
 
@@ -939,6 +1015,7 @@ class TransferLine(db.Model):
     product = db.relationship("Product")
     out_transaction = db.relationship("InventoryTransaction", foreign_keys=[out_transaction_id])
     in_transaction = db.relationship("InventoryTransaction", foreign_keys=[in_transaction_id])
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -948,6 +1025,7 @@ class TransferLine(db.Model):
             "quantity": self.quantity,
             "out_transaction_id": self.out_transaction_id,
             "in_transaction_id": self.in_transaction_id,
+            "version_id": self.version_id,
             "created_at": to_utc_z(self.created_at),
         }
 
@@ -1004,12 +1082,14 @@ class Count(db.Model):
 
     # Cancellation reason
     cancellation_reason = db.Column(db.Text, nullable=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     store = db.relationship("Store")
     created_by = db.relationship("User", foreign_keys=[created_by_user_id])
     approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
     posted_by = db.relationship("User", foreign_keys=[posted_by_user_id])
     cancelled_by = db.relationship("User", foreign_keys=[cancelled_by_user_id])
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -1030,6 +1110,7 @@ class Count(db.Model):
             "posted_at": to_utc_z(self.posted_at) if self.posted_at else None,
             "cancelled_at": to_utc_z(self.cancelled_at) if self.cancelled_at else None,
             "cancellation_reason": self.cancellation_reason,
+            "version_id": self.version_id,
         }
 
 
@@ -1065,12 +1146,14 @@ class CountLine(db.Model):
 
     # Link to inventory transaction (created when count is posted)
     inventory_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
+    version_id = db.Column(db.Integer, nullable=False, default=1)
 
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
 
     count = db.relationship("Count", backref=db.backref("lines", lazy=True))
     product = db.relationship("Product")
     inventory_transaction = db.relationship("InventoryTransaction")
+    __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
@@ -1083,6 +1166,7 @@ class CountLine(db.Model):
             "unit_cost_cents": self.unit_cost_cents,
             "variance_cost_cents": self.variance_cost_cents,
             "inventory_transaction_id": self.inventory_transaction_id,
+            "version_id": self.version_id,
             "created_at": to_utc_z(self.created_at),
         }
 

@@ -7,6 +7,7 @@ from ..extensions import db
 from ..models import Product, InventoryTransaction
 from app.time_utils import utcnow, parse_iso_datetime, to_utc_z
 from .ledger_service import append_ledger_event
+from .concurrency import lock_for_update, run_with_retry
 """
 APOS Inventory Invariants & Time Semantics (authoritative)
 
@@ -74,8 +75,17 @@ def _parse_occurred_at(value):
     raise ValueError("invalid occurred_at")
 
 
-def _ensure_product_in_store(store_id: int, product_id: int, *, require_active: bool = False) -> Product:
-    product = Product.query.get(product_id)
+def _ensure_product_in_store(
+    store_id: int,
+    product_id: int,
+    *,
+    require_active: bool = False,
+    lock: bool = False
+) -> Product:
+    query = db.session.query(Product).filter_by(id=product_id)
+    if lock:
+        query = lock_for_update(query)
+    product = query.first()
     if product is None:
         raise ValueError("product not found")
     if product.store_id != store_id:
@@ -190,41 +200,44 @@ def receive_inventory(
     DESIGN NOTE: For direct receives (e.g., from POS interface or verified deliveries),
     use default status='POSTED'. For data entry that needs review, use status='DRAFT'.
     """
-    _ensure_product_in_store(store_id, product_id, require_active=True)
+    def _op():
+        _ensure_product_in_store(store_id, product_id, require_active=True, lock=True)
 
-    occurred_dt = _parse_occurred_at(occurred_at)
+        occurred_dt = _parse_occurred_at(occurred_at)
 
-    now = utcnow()
-    if occurred_dt > (now + timedelta(minutes=2)):
-        raise ValueError("occurred_at cannot be in the future")
+        now = utcnow()
+        if occurred_dt > (now + timedelta(minutes=2)):
+            raise ValueError("occurred_at cannot be in the future")
 
-    tx = InventoryTransaction(
-        store_id=store_id,
-        product_id=product_id,
-        type="RECEIVE",
-        quantity_delta=quantity,
-        unit_cost_cents=unit_cost_cents,
-        note=note,
-        occurred_at=occurred_dt,
-        status=status,  # Phase 5: Lifecycle status
-    )
-    db.session.add(tx)
-    db.session.flush()  # ensure tx.id is assigned before we reference it
-
-    # Phase 5: Only append to master ledger if POSTED
-    # DRAFT and APPROVED transactions don't affect ledger until posted
-    if status == "POSTED":
-        append_ledger_event(
+        tx = InventoryTransaction(
             store_id=store_id,
-            event_type="INV_TX_CREATED",
-            entity_type="inventory_transaction",
-            entity_id=tx.id,
-            occurred_at=tx.occurred_at,
-            note=tx.note,
+            product_id=product_id,
+            type="RECEIVE",
+            quantity_delta=quantity,
+            unit_cost_cents=unit_cost_cents,
+            note=note,
+            occurred_at=occurred_dt,
+            status=status,  # Phase 5: Lifecycle status
         )
+        db.session.add(tx)
+        db.session.flush()  # ensure tx.id is assigned before we reference it
 
-    db.session.commit()
-    return tx
+        # Phase 5: Only append to master ledger if POSTED
+        # DRAFT and APPROVED transactions don't affect ledger until posted
+        if status == "POSTED":
+            append_ledger_event(
+                store_id=store_id,
+                event_type="INV_TX_CREATED",
+                entity_type="inventory_transaction",
+                entity_id=tx.id,
+                occurred_at=tx.occurred_at,
+                note=tx.note,
+            )
+
+        db.session.commit()
+        return tx
+
+    return run_with_retry(_op)
 
 
 
@@ -249,47 +262,50 @@ def adjust_inventory(
     manager approval before affecting inventory. Automatic adjustments (e.g., from
     cycle counts) might use status='POSTED' directly.
     """
-    _ensure_product_in_store(store_id, product_id, require_active=True)
+    def _op():
+        _ensure_product_in_store(store_id, product_id, require_active=True, lock=True)
 
-    occurred_dt = _parse_occurred_at(occurred_at)
+        occurred_dt = _parse_occurred_at(occurred_at)
 
-    now = utcnow()
-    if occurred_dt > (now + timedelta(minutes=2)):
-        raise ValueError("occurred_at cannot be in the future")
+        now = utcnow()
+        if occurred_dt > (now + timedelta(minutes=2)):
+            raise ValueError("occurred_at cannot be in the future")
 
-    # Phase 5: Only check negative on-hand for POSTED transactions
-    # DRAFT transactions don't affect inventory, so negative check doesn't apply
-    if status == "POSTED":
-        current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
-        if current + quantity_delta < 0:
-            raise ValueError("adjustment would make on-hand negative")
+        # Phase 5: Only check negative on-hand for POSTED transactions
+        # DRAFT transactions don't affect inventory, so negative check doesn't apply
+        if status == "POSTED":
+            current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
+            if current + quantity_delta < 0:
+                raise ValueError("adjustment would make on-hand negative")
 
-    tx = InventoryTransaction(
-        store_id=store_id,
-        product_id=product_id,
-        type="ADJUST",
-        quantity_delta=quantity_delta,
-        unit_cost_cents=None,
-        note=note,
-        occurred_at=occurred_dt,
-        status=status,  # Phase 5: Lifecycle status
-    )
-    db.session.add(tx)
-    db.session.flush()  # ensure tx.id is assigned before we reference it
-
-    # Phase 5: Only append to master ledger if POSTED
-    if status == "POSTED":
-        append_ledger_event(
+        tx = InventoryTransaction(
             store_id=store_id,
-            event_type="INV_TX_CREATED",
-            entity_type="inventory_transaction",
-            entity_id=tx.id,
-            occurred_at=tx.occurred_at,
-            note=tx.note,
+            product_id=product_id,
+            type="ADJUST",
+            quantity_delta=quantity_delta,
+            unit_cost_cents=None,
+            note=note,
+            occurred_at=occurred_dt,
+            status=status,  # Phase 5: Lifecycle status
         )
+        db.session.add(tx)
+        db.session.flush()  # ensure tx.id is assigned before we reference it
 
-    db.session.commit()
-    return tx
+        # Phase 5: Only append to master ledger if POSTED
+        if status == "POSTED":
+            append_ledger_event(
+                store_id=store_id,
+                event_type="INV_TX_CREATED",
+                entity_type="inventory_transaction",
+                entity_id=tx.id,
+                occurred_at=tx.occurred_at,
+                note=tx.note,
+            )
+
+        db.session.commit()
+        return tx
+
+    return run_with_retry(_op)
 
 
 
@@ -348,70 +364,73 @@ def sell_inventory(
     DESIGN NOTE: POS sales should always use status='POSTED'. Draft sales are for
     future features like quotes, estimates, or suspended transactions.
     """
-    _ensure_product_in_store(store_id, product_id, require_active=True)
+    def _op():
+        _ensure_product_in_store(store_id, product_id, require_active=True, lock=True)
 
-    occurred_dt = _parse_occurred_at(occurred_at)
+        occurred_dt = _parse_occurred_at(occurred_at)
 
-    now = utcnow()
-    if occurred_dt > (now + timedelta(minutes=2)):
-        raise ValueError("occurred_at cannot be in the future")
+        now = utcnow()
+        if occurred_dt > (now + timedelta(minutes=2)):
+            raise ValueError("occurred_at cannot be in the future")
 
-    # Idempotency: if already posted, return it
-    existing = InventoryTransaction.query.filter_by(
-        store_id=store_id,
-        sale_id=sale_id,
-        sale_line_id=sale_line_id,
-    ).first()
-    if existing is not None:
-        if existing.type != "SALE" or existing.product_id != product_id:
-            raise ValueError("sale_id/sale_line_id already used for a different transaction")
-        return existing
-
-    # Phase 5: Only perform business rule checks for POSTED transactions
-    # DRAFT sales don't affect inventory, so no need to check oversell or WAC
-    if status == "POSTED":
-        # Oversell check at effective time
-        current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
-        if current - quantity < 0:
-            raise ValueError("sale would make on-hand negative")
-
-        # Snapshot WAC at sale time
-        wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
-        if wac is None:
-            raise ValueError("cannot sell without a cost basis (no RECEIVE history as-of occurred_at)")
-    else:
-        # For DRAFT sales, we still snapshot WAC for reference, but don't enforce it
-        wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
-        if wac is None:
-            wac = 0  # Placeholder; will be recalculated on posting
-
-    tx = InventoryTransaction(
-        store_id=store_id,
-        product_id=product_id,
-        type="SALE",
-        quantity_delta=-quantity,
-        unit_cost_cents=None,
-        sale_id=sale_id,
-        sale_line_id=sale_line_id,
-        unit_cost_cents_at_sale=wac,
-        cogs_cents=wac * quantity,
-        note=note,
-        occurred_at=occurred_dt,
-        status=status,  # Phase 5: Lifecycle status
-    )
-    db.session.add(tx)
-    db.session.flush()
-
-    # Phase 5: Only append to master ledger if POSTED
-    if status == "POSTED":
-        append_ledger_event(
+        # Idempotency: if already posted, return it
+        existing = InventoryTransaction.query.filter_by(
             store_id=store_id,
-            event_type="SALE_RECORDED",
-            entity_type="inventory_transaction",
-            entity_id=tx.id,
-            occurred_at=tx.occurred_at,
-            note=tx.note,
-        )
+            sale_id=sale_id,
+            sale_line_id=sale_line_id,
+        ).first()
+        if existing is not None:
+            if existing.type != "SALE" or existing.product_id != product_id:
+                raise ValueError("sale_id/sale_line_id already used for a different transaction")
+            return existing
 
-    db.session.commit()
-    return tx
+        # Phase 5: Only perform business rule checks for POSTED transactions
+        # DRAFT sales don't affect inventory, so no need to check oversell or WAC
+        if status == "POSTED":
+            # Oversell check at effective time
+            current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
+            if current - quantity < 0:
+                raise ValueError("sale would make on-hand negative")
+
+            # Snapshot WAC at sale time
+            wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
+            if wac is None:
+                raise ValueError("cannot sell without a cost basis (no RECEIVE history as-of occurred_at)")
+        else:
+            # For DRAFT sales, we still snapshot WAC for reference, but don't enforce it
+            wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
+            if wac is None:
+                wac = 0  # Placeholder; will be recalculated on posting
+
+        tx = InventoryTransaction(
+            store_id=store_id,
+            product_id=product_id,
+            type="SALE",
+            quantity_delta=-quantity,
+            unit_cost_cents=None,
+            sale_id=sale_id,
+            sale_line_id=sale_line_id,
+            unit_cost_cents_at_sale=wac,
+            cogs_cents=wac * quantity,
+            note=note,
+            occurred_at=occurred_dt,
+            status=status,  # Phase 5: Lifecycle status
+        )
+        db.session.add(tx)
+        db.session.flush()
+
+        # Phase 5: Only append to master ledger if POSTED
+        if status == "POSTED":
+            append_ledger_event(
+                store_id=store_id,
+                event_type="SALE_RECORDED",
+                entity_type="inventory_transaction",
+                entity_id=tx.id,
+                occurred_at=tx.occurred_at,
+                note=tx.note,
+            )
+
+        db.session.commit()
+        return tx
+
+    return run_with_retry(_op)

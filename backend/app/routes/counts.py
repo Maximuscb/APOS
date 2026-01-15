@@ -2,10 +2,11 @@
 """
 Phase 11: Physical inventory count API routes.
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from app.extensions import db
 from app.decorators import require_auth, require_permission
 from app.services import count_service
+from app.services.concurrency import commit_with_retry
 from app.models import Count
 
 
@@ -37,11 +38,11 @@ def create_count():
         count = count_service.create_count(
             store_id=data["store_id"],
             count_type=data["count_type"],
-            user_id=request.user_id,
+            user_id=g.current_user.id,
             reason=data.get("reason"),
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(count.to_dict()), 201
 
@@ -85,7 +86,7 @@ def add_count_line(count_id: int):
             actual_quantity=data["actual_quantity"],
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(line.to_dict()), 201
 
@@ -117,10 +118,10 @@ def approve_count(count_id: int):
     try:
         count = count_service.approve_count(
             count_id=count_id,
-            user_id=request.user_id,
+            user_id=g.current_user.id,
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(count.to_dict()), 200
 
@@ -148,10 +149,10 @@ def post_count(count_id: int):
     try:
         count = count_service.post_count(
             count_id=count_id,
-            user_id=request.user_id,
+            user_id=g.current_user.id,
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(count.to_dict()), 200
 
@@ -190,11 +191,11 @@ def cancel_count(count_id: int):
 
         count = count_service.cancel_count(
             count_id=count_id,
-            user_id=request.user_id,
+            user_id=g.current_user.id,
             reason=reason,
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(count.to_dict()), 200
 

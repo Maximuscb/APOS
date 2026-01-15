@@ -16,6 +16,7 @@ from __future__ import annotations
 from app.extensions import db
 from app.models import Count, CountLine, InventoryTransaction
 from app.services.inventory_service import get_quantity_on_hand, get_weighted_average_cost_cents
+from app.services.concurrency import lock_for_update, run_with_retry
 from datetime import datetime, timezone
 
 
@@ -56,26 +57,29 @@ def create_count(
     Raises:
         CountError: If validation fails
     """
-    if count_type not in [COUNT_TYPE_CYCLE, COUNT_TYPE_FULL]:
-        raise CountError(f"Invalid count type: {count_type}")
+    def _op():
+        if count_type not in [COUNT_TYPE_CYCLE, COUNT_TYPE_FULL]:
+            raise CountError(f"Invalid count type: {count_type}")
 
-    # Generate document number
-    count_num = db.session.query(Count).filter_by(store_id=store_id).count()
-    document_number = f"C-{str(count_num + 1).zfill(6)}"
+        # Generate document number
+        count_num = db.session.query(Count).filter_by(store_id=store_id).count()
+        document_number = f"C-{str(count_num + 1).zfill(6)}"
 
-    count = Count(
-        store_id=store_id,
-        document_number=document_number,
-        count_type=count_type,
-        status=COUNT_STATUS_PENDING,
-        reason=reason,
-        created_by_user_id=user_id,
-    )
+        count = Count(
+            store_id=store_id,
+            document_number=document_number,
+            count_type=count_type,
+            status=COUNT_STATUS_PENDING,
+            reason=reason,
+            created_by_user_id=user_id,
+        )
 
-    db.session.add(count)
-    db.session.flush()  # Get ID
+        db.session.add(count)
+        db.session.flush()  # Get ID
 
-    return count
+        return count
+
+    return run_with_retry(_op)
 
 
 def add_count_line(
@@ -98,49 +102,52 @@ def add_count_line(
     Raises:
         CountError: If validation fails
     """
-    count = db.session.query(Count).get(count_id)
-    if not count:
-        raise CountError(f"Count {count_id} not found")
+    def _op():
+        count = lock_for_update(db.session.query(Count).filter_by(id=count_id)).first()
+        if not count:
+            raise CountError(f"Count {count_id} not found")
 
-    if count.status != COUNT_STATUS_PENDING:
-        raise CountError(f"Cannot add lines to count in {count.status} status")
+        if count.status != COUNT_STATUS_PENDING:
+            raise CountError(f"Cannot add lines to count in {count.status} status")
 
-    if actual_quantity < 0:
-        raise CountError("Actual quantity cannot be negative")
+        if actual_quantity < 0:
+            raise CountError("Actual quantity cannot be negative")
 
-    # Check if product already on this count
-    existing = db.session.query(CountLine).filter_by(
-        count_id=count_id,
-        product_id=product_id
-    ).first()
+        # Check if product already on this count
+        existing = db.session.query(CountLine).filter_by(
+            count_id=count_id,
+            product_id=product_id
+        ).first()
 
-    if existing:
-        raise CountError(f"Product {product_id} already on this count")
+        if existing:
+            raise CountError(f"Product {product_id} already on this count")
 
-    # Get expected quantity from system
-    expected_quantity = get_quantity_on_hand(count.store_id, product_id)
+        # Get expected quantity from system
+        expected_quantity = get_quantity_on_hand(count.store_id, product_id)
 
-    # Calculate variance (actual - expected)
-    variance_quantity = actual_quantity - expected_quantity
+        # Calculate variance (actual - expected)
+        variance_quantity = actual_quantity - expected_quantity
 
-    # Get WAC for cost calculation
-    unit_cost_cents = get_weighted_average_cost_cents(count.store_id, product_id)
-    variance_cost_cents = variance_quantity * unit_cost_cents if unit_cost_cents else None
+        # Get WAC for cost calculation
+        unit_cost_cents = get_weighted_average_cost_cents(count.store_id, product_id)
+        variance_cost_cents = variance_quantity * unit_cost_cents if unit_cost_cents else None
 
-    line = CountLine(
-        count_id=count_id,
-        product_id=product_id,
-        expected_quantity=expected_quantity,
-        actual_quantity=actual_quantity,
-        variance_quantity=variance_quantity,
-        unit_cost_cents=unit_cost_cents,
-        variance_cost_cents=variance_cost_cents,
-    )
+        line = CountLine(
+            count_id=count_id,
+            product_id=product_id,
+            expected_quantity=expected_quantity,
+            actual_quantity=actual_quantity,
+            variance_quantity=variance_quantity,
+            unit_cost_cents=unit_cost_cents,
+            variance_cost_cents=variance_cost_cents,
+        )
 
-    db.session.add(line)
-    db.session.flush()
+        db.session.add(line)
+        db.session.flush()
 
-    return line
+        return line
+
+    return run_with_retry(_op)
 
 
 def approve_count(
@@ -160,29 +167,32 @@ def approve_count(
     Raises:
         CountError: If validation fails
     """
-    count = db.session.query(Count).get(count_id)
-    if not count:
-        raise CountError(f"Count {count_id} not found")
+    def _op():
+        count = lock_for_update(db.session.query(Count).filter_by(id=count_id)).first()
+        if not count:
+            raise CountError(f"Count {count_id} not found")
 
-    if count.status != COUNT_STATUS_PENDING:
-        raise CountError(f"Cannot approve count in {count.status} status")
+        if count.status != COUNT_STATUS_PENDING:
+            raise CountError(f"Cannot approve count in {count.status} status")
 
-    if not count.lines:
-        raise CountError("Cannot approve count with no lines")
+        if not count.lines:
+            raise CountError("Cannot approve count with no lines")
 
-    # Calculate totals
-    total_variance_units = sum(line.variance_quantity for line in count.lines)
-    total_variance_cost_cents = sum(
-        line.variance_cost_cents for line in count.lines if line.variance_cost_cents
-    )
+        # Calculate totals
+        total_variance_units = sum(line.variance_quantity for line in count.lines)
+        total_variance_cost_cents = sum(
+            line.variance_cost_cents for line in count.lines if line.variance_cost_cents
+        )
 
-    count.total_variance_units = total_variance_units
-    count.total_variance_cost_cents = total_variance_cost_cents
-    count.status = COUNT_STATUS_APPROVED
-    count.approved_by_user_id = user_id
-    count.approved_at = datetime.now(timezone.utc)
+        count.total_variance_units = total_variance_units
+        count.total_variance_cost_cents = total_variance_cost_cents
+        count.status = COUNT_STATUS_APPROVED
+        count.approved_by_user_id = user_id
+        count.approved_at = datetime.now(timezone.utc)
 
-    return count
+        return count
+
+    return run_with_retry(_op)
 
 
 def post_count(
@@ -202,44 +212,47 @@ def post_count(
     Raises:
         CountError: If validation fails
     """
-    count = db.session.query(Count).get(count_id)
-    if not count:
-        raise CountError(f"Count {count_id} not found")
+    def _op():
+        count = lock_for_update(db.session.query(Count).filter_by(id=count_id)).first()
+        if not count:
+            raise CountError(f"Count {count_id} not found")
 
-    if count.status != COUNT_STATUS_APPROVED:
-        raise CountError(f"Cannot post count in {count.status} status")
+        if count.status != COUNT_STATUS_APPROVED:
+            raise CountError(f"Cannot post count in {count.status} status")
 
-    # Create ADJUST transaction for each line with variance
-    for line in count.lines:
-        if line.variance_quantity == 0:
-            # No variance, skip
-            continue
+        # Create ADJUST transaction for each line with variance
+        for line in count.lines:
+            if line.variance_quantity == 0:
+                # No variance, skip
+                continue
 
-        # Create ADJUST transaction
-        txn = InventoryTransaction(
-            store_id=count.store_id,
-            product_id=line.product_id,
-            type="ADJUST",
-            quantity_delta=line.variance_quantity,  # Positive or negative
-            unit_cost_cents=None,  # Not a RECEIVE
-            status="POSTED",  # Immediately affects inventory
-            inventory_state="SELLABLE",  # Adjusting sellable inventory
-            posted_by_user_id=user_id,
-            posted_at=datetime.now(timezone.utc),
-            note=f"Count {count.document_number} variance: {line.variance_quantity}",
-        )
+            # Create ADJUST transaction
+            txn = InventoryTransaction(
+                store_id=count.store_id,
+                product_id=line.product_id,
+                type="ADJUST",
+                quantity_delta=line.variance_quantity,  # Positive or negative
+                unit_cost_cents=None,  # Not a RECEIVE
+                status="POSTED",  # Immediately affects inventory
+                inventory_state="SELLABLE",  # Adjusting sellable inventory
+                posted_by_user_id=user_id,
+                posted_at=datetime.now(timezone.utc),
+                note=f"Count {count.document_number} variance: {line.variance_quantity}",
+            )
 
-        db.session.add(txn)
-        db.session.flush()
+            db.session.add(txn)
+            db.session.flush()
 
-        # Link transaction to line
-        line.inventory_transaction_id = txn.id
+            # Link transaction to line
+            line.inventory_transaction_id = txn.id
 
-    count.status = COUNT_STATUS_POSTED
-    count.posted_by_user_id = user_id
-    count.posted_at = datetime.now(timezone.utc)
+        count.status = COUNT_STATUS_POSTED
+        count.posted_by_user_id = user_id
+        count.posted_at = datetime.now(timezone.utc)
 
-    return count
+        return count
+
+    return run_with_retry(_op)
 
 
 def cancel_count(
@@ -261,22 +274,25 @@ def cancel_count(
     Raises:
         CountError: If validation fails
     """
-    count = db.session.query(Count).get(count_id)
-    if not count:
-        raise CountError(f"Count {count_id} not found")
+    def _op():
+        count = lock_for_update(db.session.query(Count).filter_by(id=count_id)).first()
+        if not count:
+            raise CountError(f"Count {count_id} not found")
 
-    if count.status not in [COUNT_STATUS_PENDING, COUNT_STATUS_APPROVED]:
-        raise CountError(
-            f"Cannot cancel count in {count.status} status. "
-            f"Counts can only be cancelled before posting."
-        )
+        if count.status not in [COUNT_STATUS_PENDING, COUNT_STATUS_APPROVED]:
+            raise CountError(
+                f"Cannot cancel count in {count.status} status. "
+                f"Counts can only be cancelled before posting."
+            )
 
-    count.status = COUNT_STATUS_CANCELLED
-    count.cancelled_by_user_id = user_id
-    count.cancelled_at = datetime.now(timezone.utc)
-    count.cancellation_reason = reason
+        count.status = COUNT_STATUS_CANCELLED
+        count.cancelled_by_user_id = user_id
+        count.cancelled_at = datetime.now(timezone.utc)
+        count.cancellation_reason = reason
 
-    return count
+        return count
+
+    return run_with_retry(_op)
 
 
 def get_count_summary(count_id: int) -> dict:

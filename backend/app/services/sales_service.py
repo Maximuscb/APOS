@@ -9,6 +9,7 @@ from ..extensions import db
 from ..models import Sale, SaleLine, Product
 from app.time_utils import utcnow
 from .inventory_service import sell_inventory
+from .concurrency import lock_for_update, run_with_retry
 
 
 def generate_document_number(store_id: int) -> str:
@@ -45,33 +46,36 @@ def create_sale(store_id: int, user_id: int | None = None) -> Sale:
 
 def add_line(sale_id: int, product_id: int, quantity: int) -> SaleLine:
     """Add line item to draft sale."""
-    sale = db.session.query(Sale).get(sale_id)
-    if not sale:
-        raise ValueError("Sale not found")
+    def _op():
+        sale = lock_for_update(db.session.query(Sale).filter_by(id=sale_id)).first()
+        if not sale:
+            raise ValueError("Sale not found")
 
-    if sale.status != "DRAFT":
-        raise ValueError("Can only add lines to DRAFT sales")
+        if sale.status != "DRAFT":
+            raise ValueError("Can only add lines to DRAFT sales")
 
-    product = db.session.query(Product).get(product_id)
-    if not product:
-        raise ValueError("Product not found")
+        product = db.session.query(Product).filter_by(id=product_id).first()
+        if not product:
+            raise ValueError("Product not found")
 
-    if product.price_cents is None:
-        raise ValueError("Product has no price")
+        if product.price_cents is None:
+            raise ValueError("Product has no price")
 
-    line_total = product.price_cents * quantity
+        line_total = product.price_cents * quantity
 
-    line = SaleLine(
-        sale_id=sale_id,
-        product_id=product_id,
-        quantity=quantity,
-        unit_price_cents=product.price_cents,
-        line_total_cents=line_total
-    )
+        line = SaleLine(
+            sale_id=sale_id,
+            product_id=product_id,
+            quantity=quantity,
+            unit_price_cents=product.price_cents,
+            line_total_cents=line_total
+        )
 
-    db.session.add(line)
-    db.session.commit()
-    return line
+        db.session.add(line)
+        db.session.commit()
+        return line
+
+    return run_with_retry(_op)
 
 
 def post_sale(sale_id: int) -> Sale:
@@ -79,35 +83,38 @@ def post_sale(sale_id: int) -> Sale:
     Post sale - creates inventory transactions with lifecycle=POSTED.
     This is the bridge between sale document and inventory ledger.
     """
-    sale = db.session.query(Sale).get(sale_id)
-    if not sale:
-        raise ValueError("Sale not found")
+    def _op():
+        sale = lock_for_update(db.session.query(Sale).filter_by(id=sale_id)).first()
+        if not sale:
+            raise ValueError("Sale not found")
 
-    if sale.status == "POSTED":
+        if sale.status == "POSTED":
+            return sale
+
+        if sale.status != "DRAFT":
+            raise ValueError(f"Cannot post sale with status {sale.status}")
+
+        lines = db.session.query(SaleLine).filter_by(sale_id=sale_id).all()
+        if not lines:
+            raise ValueError("Cannot post sale with no lines")
+
+        # Create inventory transactions for each line
+        for i, line in enumerate(lines):
+            inv_tx = sell_inventory(
+                store_id=sale.store_id,
+                product_id=line.product_id,
+                quantity=line.quantity,
+                sale_id=sale.document_number,
+                sale_line_id=str(i + 1),
+                status="POSTED",
+                note=f"Sale {sale.document_number}"
+            )
+            line.inventory_transaction_id = inv_tx.id
+
+        sale.status = "POSTED"
+        sale.completed_at = utcnow()
+
+        db.session.commit()
         return sale
 
-    if sale.status != "DRAFT":
-        raise ValueError(f"Cannot post sale with status {sale.status}")
-
-    lines = db.session.query(SaleLine).filter_by(sale_id=sale_id).all()
-    if not lines:
-        raise ValueError("Cannot post sale with no lines")
-
-    # Create inventory transactions for each line
-    for i, line in enumerate(lines):
-        inv_tx = sell_inventory(
-            store_id=sale.store_id,
-            product_id=line.product_id,
-            quantity=line.quantity,
-            sale_id=sale.document_number,
-            sale_line_id=str(i + 1),
-            status="POSTED",
-            note=f"Sale {sale.document_number}"
-        )
-        line.inventory_transaction_id = inv_tx.id
-
-    sale.status = "POSTED"
-    sale.completed_at = utcnow()
-
-    db.session.commit()
-    return sale
+    return run_with_retry(_op)

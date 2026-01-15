@@ -31,6 +31,8 @@ def create_app() -> Flask:
     from .routes.returns import returns_bp  # Phase 10: Returns & COGS reversal
     from .routes.transfers import transfers_bp  # Phase 11: Inter-store transfers
     from .routes.counts import counts_bp  # Phase 11: Physical counts
+    from .routes.stores import stores_bp  # Phase 13: Store management
+    from .routes.reports import reports_bp  # Phase 14: Reporting & analytics
 
     app.register_blueprint(system_bp)
     app.register_blueprint(products_bp)
@@ -45,6 +47,8 @@ def create_app() -> Flask:
     app.register_blueprint(returns_bp)
     app.register_blueprint(transfers_bp)
     app.register_blueprint(counts_bp)
+    app.register_blueprint(stores_bp)
+    app.register_blueprint(reports_bp)
 
     @app.after_request
     def add_cors_headers(response):

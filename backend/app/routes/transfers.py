@@ -2,10 +2,11 @@
 """
 Phase 11: Inter-store transfer API routes.
 """
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from app.extensions import db
 from app.decorators import require_auth, require_permission
 from app.services import transfer_service
+from app.services.concurrency import commit_with_retry
 from app.models import Transfer
 
 
@@ -37,11 +38,11 @@ def create_transfer():
         transfer = transfer_service.create_transfer(
             from_store_id=data["from_store_id"],
             to_store_id=data["to_store_id"],
-            user_id=request.user_id,
+            user_id=g.current_user.id,
             reason=data.get("reason"),
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(transfer.to_dict()), 201
 
@@ -84,7 +85,7 @@ def add_transfer_line(transfer_id: int):
             quantity=data["quantity"],
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(line.to_dict()), 201
 
@@ -115,10 +116,10 @@ def approve_transfer(transfer_id: int):
     try:
         transfer = transfer_service.approve_transfer(
             transfer_id=transfer_id,
-            user_id=request.user_id,
+            user_id=g.current_user.id,
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(transfer.to_dict()), 200
 
@@ -147,10 +148,10 @@ def ship_transfer(transfer_id: int):
     try:
         transfer = transfer_service.ship_transfer(
             transfer_id=transfer_id,
-            user_id=request.user_id,
+            user_id=g.current_user.id,
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(transfer.to_dict()), 200
 
@@ -179,10 +180,10 @@ def receive_transfer(transfer_id: int):
     try:
         transfer = transfer_service.receive_transfer(
             transfer_id=transfer_id,
-            user_id=request.user_id,
+            user_id=g.current_user.id,
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(transfer.to_dict()), 200
 
@@ -221,11 +222,11 @@ def cancel_transfer(transfer_id: int):
 
         transfer = transfer_service.cancel_transfer(
             transfer_id=transfer_id,
-            user_id=request.user_id,
+            user_id=g.current_user.id,
             reason=reason,
         )
 
-        db.session.commit()
+        commit_with_retry()
 
         return jsonify(transfer.to_dict()), 200
 

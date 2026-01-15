@@ -15,6 +15,7 @@ DESIGN PRINCIPLES:
 from ..extensions import db
 from ..models import Sale, SaleLine, Payment, PaymentTransaction
 from app.time_utils import utcnow
+from .concurrency import lock_for_update, run_with_retry
 
 
 class PaymentError(Exception):
@@ -85,65 +86,68 @@ def add_payment(
     Raises:
         PaymentError: If sale not found, amount invalid, or tender type invalid
     """
-    # Validate tender type
-    if tender_type not in VALID_TENDER_TYPES:
-        raise PaymentError(f"Invalid tender type: {tender_type}. Must be one of {VALID_TENDER_TYPES}")
+    def _op():
+        # Validate tender type
+        if tender_type not in VALID_TENDER_TYPES:
+            raise PaymentError(f"Invalid tender type: {tender_type}. Must be one of {VALID_TENDER_TYPES}")
 
-    # Validate amount
-    if amount_cents <= 0:
-        raise PaymentError("Payment amount must be positive")
+        # Validate amount
+        if amount_cents <= 0:
+            raise PaymentError("Payment amount must be positive")
 
-    # Get sale
-    sale = db.session.query(Sale).get(sale_id)
-    if not sale:
-        raise PaymentError(f"Sale {sale_id} not found")
+        # Get sale (locked for payment updates)
+        sale = lock_for_update(db.session.query(Sale).filter_by(id=sale_id)).first()
+        if not sale:
+            raise PaymentError(f"Sale {sale_id} not found")
 
-    # Calculate sale total from lines
-    total_due = calculate_sale_total(sale_id)
+        # Calculate sale total from lines
+        total_due = calculate_sale_total(sale_id)
 
-    # Calculate change (for cash over-tender)
-    remaining_due = total_due - sale.total_paid_cents
-    change_cents = 0
+        # Calculate change (for cash over-tender)
+        remaining_due = total_due - sale.total_paid_cents
+        change_cents = 0
 
-    if tender_type == TENDER_CASH and amount_cents > remaining_due:
-        change_cents = amount_cents - remaining_due
+        if tender_type == TENDER_CASH and amount_cents > remaining_due:
+            change_cents = amount_cents - remaining_due
 
-    # Create payment
-    payment = Payment(
-        sale_id=sale_id,
-        tender_type=tender_type,
-        amount_cents=amount_cents,
-        status="COMPLETED",
-        reference_number=reference_number,
-        change_cents=change_cents,
-        created_by_user_id=user_id,
-        created_at=utcnow(),
-        register_id=register_id,
-        register_session_id=register_session_id
-    )
+        # Create payment
+        payment = Payment(
+            sale_id=sale_id,
+            tender_type=tender_type,
+            amount_cents=amount_cents,
+            status="COMPLETED",
+            reference_number=reference_number,
+            change_cents=change_cents,
+            created_by_user_id=user_id,
+            created_at=utcnow(),
+            register_id=register_id,
+            register_session_id=register_session_id
+        )
 
-    db.session.add(payment)
-    db.session.flush()  # Get payment ID
+        db.session.add(payment)
+        db.session.flush()  # Get payment ID
 
-    # Log to payment transaction ledger
-    _log_payment_transaction(
-        payment_id=payment.id,
-        sale_id=sale_id,
-        transaction_type="PAYMENT",
-        amount_cents=amount_cents,
-        tender_type=tender_type,
-        user_id=user_id,
-        reason=None,
-        register_id=register_id,
-        register_session_id=register_session_id
-    )
+        # Log to payment transaction ledger
+        _log_payment_transaction(
+            payment_id=payment.id,
+            sale_id=sale_id,
+            transaction_type="PAYMENT",
+            amount_cents=amount_cents,
+            tender_type=tender_type,
+            user_id=user_id,
+            reason=None,
+            register_id=register_id,
+            register_session_id=register_session_id
+        )
 
-    # Update sale payment status
-    _update_sale_payment_status(sale_id)
+        # Update sale payment status
+        _update_sale_payment_status(sale_id)
 
-    db.session.commit()
+        db.session.commit()
 
-    return payment
+        return payment
+
+    return run_with_retry(_op)
 
 
 def calculate_sale_total(sale_id: int) -> int:
@@ -224,39 +228,45 @@ def void_payment(
     Raises:
         PaymentError: If payment not found or already voided
     """
-    payment = db.session.query(Payment).get(payment_id)
+    def _op():
+        payment = lock_for_update(db.session.query(Payment).filter_by(id=payment_id)).first()
 
-    if not payment:
-        raise PaymentError(f"Payment {payment_id} not found")
+        if not payment:
+            raise PaymentError(f"Payment {payment_id} not found")
 
-    if payment.status == "VOIDED":
-        raise PaymentError(f"Payment {payment_id} already voided")
+        if payment.status == "VOIDED":
+            raise PaymentError(f"Payment {payment_id} already voided")
 
-    # Void payment
-    payment.status = "VOIDED"
-    payment.voided_by_user_id = user_id
-    payment.voided_at = utcnow()
-    payment.void_reason = reason
+        # Lock sale for status update
+        lock_for_update(db.session.query(Sale).filter_by(id=payment.sale_id)).first()
 
-    # Log void to ledger (negative amount)
-    _log_payment_transaction(
-        payment_id=payment.id,
-        sale_id=payment.sale_id,
-        transaction_type="VOID",
-        amount_cents=-payment.amount_cents,  # Negative for reversal
-        tender_type=payment.tender_type,
-        user_id=user_id,
-        reason=reason,
-        register_id=register_id,
-        register_session_id=register_session_id
-    )
+        # Void payment
+        payment.status = "VOIDED"
+        payment.voided_by_user_id = user_id
+        payment.voided_at = utcnow()
+        payment.void_reason = reason
 
-    # Update sale payment status
-    _update_sale_payment_status(payment.sale_id)
+        # Log void to ledger (negative amount)
+        _log_payment_transaction(
+            payment_id=payment.id,
+            sale_id=payment.sale_id,
+            transaction_type="VOID",
+            amount_cents=-payment.amount_cents,  # Negative for reversal
+            tender_type=payment.tender_type,
+            user_id=user_id,
+            reason=reason,
+            register_id=register_id,
+            register_session_id=register_session_id
+        )
 
-    db.session.commit()
+        # Update sale payment status
+        _update_sale_payment_status(payment.sale_id)
 
-    return payment
+        db.session.commit()
+
+        return payment
+
+    return run_with_retry(_op)
 
 
 # =============================================================================

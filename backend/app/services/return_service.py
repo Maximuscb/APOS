@@ -23,6 +23,7 @@ from ..extensions import db
 from ..models import Return, ReturnLine, Sale, SaleLine, InventoryTransaction
 from app.time_utils import utcnow
 from sqlalchemy import and_
+from .concurrency import lock_for_update, run_with_retry
 
 
 class ReturnError(Exception):
@@ -74,37 +75,40 @@ def create_return(
     Raises:
         ReturnError: If sale not found or invalid
     """
-    # Verify sale exists
-    sale = db.session.query(Sale).get(original_sale_id)
-    if not sale:
-        raise ReturnError(f"Sale {original_sale_id} not found")
+    def _op():
+        # Verify sale exists
+        sale = lock_for_update(db.session.query(Sale).filter_by(id=original_sale_id)).first()
+        if not sale:
+            raise ReturnError(f"Sale {original_sale_id} not found")
 
-    if sale.status != "POSTED":
-        raise ReturnError(f"Can only return POSTED sales. Sale {original_sale_id} has status: {sale.status}")
+        if sale.status != "POSTED":
+            raise ReturnError(f"Can only return POSTED sales. Sale {original_sale_id} has status: {sale.status}")
 
-    # Generate document number
-    # Count existing returns for store to get next number
-    count = db.session.query(Return).filter_by(store_id=store_id).count()
-    document_number = f"R-{str(count + 1).zfill(6)}"
+        # Generate document number
+        # Count existing returns for store to get next number
+        count = db.session.query(Return).filter_by(store_id=store_id).count()
+        document_number = f"R-{str(count + 1).zfill(6)}"
 
-    # Create return
-    return_doc = Return(
-        store_id=store_id,
-        document_number=document_number,
-        original_sale_id=original_sale_id,
-        status=RETURN_STATUS_PENDING,
-        reason=reason,
-        restocking_fee_cents=restocking_fee_cents,
-        created_at=utcnow(),
-        created_by_user_id=user_id,
-        register_id=register_id,
-        register_session_id=register_session_id
-    )
+        # Create return
+        return_doc = Return(
+            store_id=store_id,
+            document_number=document_number,
+            original_sale_id=original_sale_id,
+            status=RETURN_STATUS_PENDING,
+            reason=reason,
+            restocking_fee_cents=restocking_fee_cents,
+            created_at=utcnow(),
+            created_by_user_id=user_id,
+            register_id=register_id,
+            register_session_id=register_session_id
+        )
 
-    db.session.add(return_doc)
-    db.session.commit()
+        db.session.add(return_doc)
+        db.session.commit()
 
-    return return_doc
+        return return_doc
+
+    return run_with_retry(_op)
 
 
 def add_return_line(
@@ -129,80 +133,83 @@ def add_return_line(
     Raises:
         ReturnError: If return not PENDING, sale line not found, or quantity invalid
     """
-    # Get return
-    return_doc = db.session.query(Return).get(return_id)
-    if not return_doc:
-        raise ReturnError(f"Return {return_id} not found")
+    def _op():
+        # Get return
+        return_doc = lock_for_update(db.session.query(Return).filter_by(id=return_id)).first()
+        if not return_doc:
+            raise ReturnError(f"Return {return_id} not found")
 
-    if return_doc.status != RETURN_STATUS_PENDING:
-        raise ReturnError(f"Can only add lines to PENDING returns. Return {return_id} has status: {return_doc.status}")
+        if return_doc.status != RETURN_STATUS_PENDING:
+            raise ReturnError(f"Can only add lines to PENDING returns. Return {return_id} has status: {return_doc.status}")
 
-    # Get original sale line
-    sale_line = db.session.query(SaleLine).get(original_sale_line_id)
-    if not sale_line:
-        raise ReturnError(f"SaleLine {original_sale_line_id} not found")
+        # Get original sale line
+        sale_line = db.session.query(SaleLine).filter_by(id=original_sale_line_id).first()
+        if not sale_line:
+            raise ReturnError(f"SaleLine {original_sale_line_id} not found")
 
-    # Verify sale line belongs to the original sale
-    if sale_line.sale_id != return_doc.original_sale_id:
-        raise ReturnError(f"SaleLine {original_sale_line_id} does not belong to sale {return_doc.original_sale_id}")
+        # Verify sale line belongs to the original sale
+        if sale_line.sale_id != return_doc.original_sale_id:
+            raise ReturnError(f"SaleLine {original_sale_line_id} does not belong to sale {return_doc.original_sale_id}")
 
-    # Validate quantity
-    if quantity <= 0:
-        raise ReturnError("Return quantity must be positive")
+        # Validate quantity
+        if quantity <= 0:
+            raise ReturnError("Return quantity must be positive")
 
-    if quantity > sale_line.quantity:
-        raise ReturnError(f"Cannot return {quantity} units. Original sale only had {sale_line.quantity} units.")
+        if quantity > sale_line.quantity:
+            raise ReturnError(f"Cannot return {quantity} units. Original sale only had {sale_line.quantity} units.")
 
-    # Check if already returned
-    existing_returns = db.session.query(ReturnLine).filter_by(
-        original_sale_line_id=original_sale_line_id
-    ).join(Return).filter(
-        Return.status.in_([RETURN_STATUS_COMPLETED, RETURN_STATUS_APPROVED, RETURN_STATUS_PENDING])
-    ).all()
+        # Check if already returned
+        existing_returns = db.session.query(ReturnLine).filter_by(
+            original_sale_line_id=original_sale_line_id
+        ).join(Return).filter(
+            Return.status.in_([RETURN_STATUS_COMPLETED, RETURN_STATUS_APPROVED, RETURN_STATUS_PENDING])
+        ).all()
 
-    total_returned = sum(r.quantity for r in existing_returns)
-    if total_returned + quantity > sale_line.quantity:
-        raise ReturnError(
-            f"Cannot return {quantity} units. Original quantity: {sale_line.quantity}, "
-            f"already returned: {total_returned}, available: {sale_line.quantity - total_returned}"
+        total_returned = sum(r.quantity for r in existing_returns)
+        if total_returned + quantity > sale_line.quantity:
+            raise ReturnError(
+                f"Cannot return {quantity} units. Original quantity: {sale_line.quantity}, "
+                f"already returned: {total_returned}, available: {sale_line.quantity - total_returned}"
+            )
+
+        # Get original COGS from inventory transaction
+        # CRITICAL: This is the original cost at sale time, not current WAC
+        original_inv_txn = db.session.query(InventoryTransaction).get(sale_line.inventory_transaction_id)
+        original_unit_cost_cents = None
+        original_cogs_cents = None
+
+        if original_inv_txn:
+            original_unit_cost_cents = original_inv_txn.unit_cost_cents_at_sale
+            # Calculate COGS for returned quantity
+            if original_unit_cost_cents:
+                original_cogs_cents = original_unit_cost_cents * quantity
+
+        # Calculate refund for this line
+        line_refund_cents = sale_line.unit_price_cents * quantity
+
+        # Create return line
+        return_line = ReturnLine(
+            return_id=return_id,
+            original_sale_line_id=original_sale_line_id,
+            product_id=sale_line.product_id,
+            quantity=quantity,
+            unit_price_cents=sale_line.unit_price_cents,
+            line_refund_cents=line_refund_cents,
+            original_unit_cost_cents=original_unit_cost_cents,
+            original_cogs_cents=original_cogs_cents,
+            created_at=utcnow()
         )
 
-    # Get original COGS from inventory transaction
-    # CRITICAL: This is the original cost at sale time, not current WAC
-    original_inv_txn = db.session.query(InventoryTransaction).get(sale_line.inventory_transaction_id)
-    original_unit_cost_cents = None
-    original_cogs_cents = None
+        db.session.add(return_line)
 
-    if original_inv_txn:
-        original_unit_cost_cents = original_inv_txn.unit_cost_cents_at_sale
-        # Calculate COGS for returned quantity
-        if original_unit_cost_cents:
-            original_cogs_cents = original_unit_cost_cents * quantity
+        # Update return total refund amount
+        _update_return_refund_amount(return_id)
 
-    # Calculate refund for this line
-    line_refund_cents = sale_line.unit_price_cents * quantity
+        db.session.commit()
 
-    # Create return line
-    return_line = ReturnLine(
-        return_id=return_id,
-        original_sale_line_id=original_sale_line_id,
-        product_id=sale_line.product_id,
-        quantity=quantity,
-        unit_price_cents=sale_line.unit_price_cents,
-        line_refund_cents=line_refund_cents,
-        original_unit_cost_cents=original_unit_cost_cents,
-        original_cogs_cents=original_cogs_cents,
-        created_at=utcnow()
-    )
+        return return_line
 
-    db.session.add(return_line)
-
-    # Update return total refund amount
-    _update_return_refund_amount(return_id)
-
-    db.session.commit()
-
-    return return_line
+    return run_with_retry(_op)
 
 
 # =============================================================================
@@ -229,25 +236,28 @@ def approve_return(
     Raises:
         ReturnError: If return not PENDING
     """
-    return_doc = db.session.query(Return).get(return_id)
-    if not return_doc:
-        raise ReturnError(f"Return {return_id} not found")
+    def _op():
+        return_doc = lock_for_update(db.session.query(Return).filter_by(id=return_id)).first()
+        if not return_doc:
+            raise ReturnError(f"Return {return_id} not found")
 
-    if return_doc.status != RETURN_STATUS_PENDING:
-        raise ReturnError(f"Can only approve PENDING returns. Return {return_id} has status: {return_doc.status}")
+        if return_doc.status != RETURN_STATUS_PENDING:
+            raise ReturnError(f"Can only approve PENDING returns. Return {return_id} has status: {return_doc.status}")
 
-    # Check that return has lines
-    if not return_doc.lines:
-        raise ReturnError(f"Cannot approve return {return_id} with no lines")
+        # Check that return has lines
+        if not return_doc.lines:
+            raise ReturnError(f"Cannot approve return {return_id} with no lines")
 
-    # Approve return
-    return_doc.status = RETURN_STATUS_APPROVED
-    return_doc.approved_at = utcnow()
-    return_doc.approved_by_user_id = manager_user_id
+        # Approve return
+        return_doc.status = RETURN_STATUS_APPROVED
+        return_doc.approved_at = utcnow()
+        return_doc.approved_by_user_id = manager_user_id
 
-    db.session.commit()
+        db.session.commit()
 
-    return return_doc
+        return return_doc
+
+    return run_with_retry(_op)
 
 
 def reject_return(
@@ -275,22 +285,25 @@ def reject_return(
     Raises:
         ReturnError: If return not PENDING
     """
-    return_doc = db.session.query(Return).get(return_id)
-    if not return_doc:
-        raise ReturnError(f"Return {return_id} not found")
+    def _op():
+        return_doc = lock_for_update(db.session.query(Return).filter_by(id=return_id)).first()
+        if not return_doc:
+            raise ReturnError(f"Return {return_id} not found")
 
-    if return_doc.status != RETURN_STATUS_PENDING:
-        raise ReturnError(f"Can only reject PENDING returns. Return {return_id} has status: {return_doc.status}")
+        if return_doc.status != RETURN_STATUS_PENDING:
+            raise ReturnError(f"Can only reject PENDING returns. Return {return_id} has status: {return_doc.status}")
 
-    # Reject return
-    return_doc.status = RETURN_STATUS_REJECTED
-    return_doc.rejected_at = utcnow()
-    return_doc.rejected_by_user_id = manager_user_id
-    return_doc.rejection_reason = rejection_reason
+        # Reject return
+        return_doc.status = RETURN_STATUS_REJECTED
+        return_doc.rejected_at = utcnow()
+        return_doc.rejected_by_user_id = manager_user_id
+        return_doc.rejection_reason = rejection_reason
 
-    db.session.commit()
+        db.session.commit()
 
-    return return_doc
+        return return_doc
+
+    return run_with_retry(_op)
 
 
 # =============================================================================
@@ -327,48 +340,51 @@ def complete_return(
     Raises:
         ReturnError: If return not APPROVED
     """
-    return_doc = db.session.query(Return).get(return_id)
-    if not return_doc:
-        raise ReturnError(f"Return {return_id} not found")
+    def _op():
+        return_doc = lock_for_update(db.session.query(Return).filter_by(id=return_id)).first()
+        if not return_doc:
+            raise ReturnError(f"Return {return_id} not found")
 
-    if return_doc.status != RETURN_STATUS_APPROVED:
-        raise ReturnError(f"Can only complete APPROVED returns. Return {return_id} has status: {return_doc.status}")
+        if return_doc.status != RETURN_STATUS_APPROVED:
+            raise ReturnError(f"Can only complete APPROVED returns. Return {return_id} has status: {return_doc.status}")
 
-    # Process each return line: create RETURN inventory transaction
-    for return_line in return_doc.lines:
-        # Create RETURN inventory transaction
-        # Positive quantity_delta to restore inventory
-        inv_txn = InventoryTransaction(
-            store_id=return_doc.store_id,
-            product_id=return_line.product_id,
-            type="RETURN",
-            quantity_delta=return_line.quantity,  # Positive: restoring inventory
-            unit_cost_cents=None,  # Not a RECEIVE, so no new cost
-            note=f"Return from sale {return_doc.original_sale_id}",
-            occurred_at=utcnow(),
-            status="POSTED",  # Returns are immediately posted
-            # Reference to return
-            sale_id=str(return_doc.id),  # Using return ID here for traceability
-            sale_line_id=str(return_line.id),
-            # CRITICAL: Credit original COGS (COGS reversal)
-            unit_cost_cents_at_sale=return_line.original_unit_cost_cents,
-            cogs_cents=-return_line.original_cogs_cents if return_line.original_cogs_cents else None  # Negative to credit back
-        )
+        # Process each return line: create RETURN inventory transaction
+        for return_line in return_doc.lines:
+            # Create RETURN inventory transaction
+            # Positive quantity_delta to restore inventory
+            inv_txn = InventoryTransaction(
+                store_id=return_doc.store_id,
+                product_id=return_line.product_id,
+                type="RETURN",
+                quantity_delta=return_line.quantity,  # Positive: restoring inventory
+                unit_cost_cents=None,  # Not a RECEIVE, so no new cost
+                note=f"Return from sale {return_doc.original_sale_id}",
+                occurred_at=utcnow(),
+                status="POSTED",  # Returns are immediately posted
+                # Reference to return
+                sale_id=str(return_doc.id),  # Using return ID here for traceability
+                sale_line_id=str(return_line.id),
+                # CRITICAL: Credit original COGS (COGS reversal)
+                unit_cost_cents_at_sale=return_line.original_unit_cost_cents,
+                cogs_cents=-return_line.original_cogs_cents if return_line.original_cogs_cents else None  # Negative to credit back
+            )
 
-        db.session.add(inv_txn)
-        db.session.flush()  # Get ID
+            db.session.add(inv_txn)
+            db.session.flush()  # Get ID
 
-        # Link return line to inventory transaction
-        return_line.inventory_transaction_id = inv_txn.id
+            # Link return line to inventory transaction
+            return_line.inventory_transaction_id = inv_txn.id
 
-    # Mark return as completed
-    return_doc.status = RETURN_STATUS_COMPLETED
-    return_doc.completed_at = utcnow()
-    return_doc.completed_by_user_id = user_id
+        # Mark return as completed
+        return_doc.status = RETURN_STATUS_COMPLETED
+        return_doc.completed_at = utcnow()
+        return_doc.completed_by_user_id = user_id
 
-    db.session.commit()
+        db.session.commit()
 
-    return return_doc
+        return return_doc
+
+    return run_with_retry(_op)
 
 
 # =============================================================================
