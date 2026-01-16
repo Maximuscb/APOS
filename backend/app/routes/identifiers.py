@@ -8,7 +8,7 @@ SECURITY: All routes require authentication.
 - Deactivating identifiers requires MANAGE_IDENTIFIERS permission
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 
 from ..services import identifier_service
 from ..decorators import require_auth, require_permission
@@ -37,8 +37,9 @@ def lookup_product_route(value: str):
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to lookup identifier")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @identifiers_bp.post("/")
@@ -73,8 +74,9 @@ def add_identifier_route():
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to add identifier")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @identifiers_bp.post("/<int:identifier_id>/deactivate")
@@ -102,8 +104,9 @@ def deactivate_identifier_route(identifier_id: int):
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to deactivate identifier")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @identifiers_bp.post("/<int:identifier_id>/reactivate")
@@ -128,5 +131,6 @@ def reactivate_identifier_route(identifier_id: int):
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to reactivate identifier")
+        return jsonify({"error": "Internal server error"}), 500

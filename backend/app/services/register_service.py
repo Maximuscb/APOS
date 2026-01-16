@@ -15,6 +15,8 @@ from ..extensions import db
 from ..models import Register, RegisterSession, CashDrawerEvent, Sale
 from app.time_utils import utcnow
 from sqlalchemy import and_
+from .concurrency import lock_for_update
+from .ledger_service import append_ledger_event
 
 
 class RegisterError(Exception):
@@ -155,6 +157,7 @@ def open_shift(
     session = RegisterSession(
         register_id=register_id,
         user_id=user_id,
+        opened_by_user_id=user_id,
         status="OPEN",
         opening_cash_cents=opening_cash_cents,
         expected_cash_cents=opening_cash_cents,  # Initially same as opening cash
@@ -163,6 +166,19 @@ def open_shift(
 
     db.session.add(session)
     db.session.commit()
+
+    append_ledger_event(
+        store_id=register.store_id,
+        event_type="register.session_opened",
+        event_category="register",
+        entity_type="register_session",
+        entity_id=session.id,
+        actor_user_id=user_id,
+        register_id=register_id,
+        register_session_id=session.id,
+        occurred_at=session.opened_at,
+        note="Shift opened",
+    )
 
     # Log drawer open event
     log_drawer_event(
@@ -180,7 +196,10 @@ def open_shift(
 def close_shift(
     session_id: int,
     closing_cash_cents: int,
-    notes: str | None = None
+    notes: str | None = None,
+    *,
+    current_user_id: int | None = None,
+    manager_override: bool = False,
 ) -> RegisterSession:
     """
     Close a shift and calculate cash variance.
@@ -198,13 +217,16 @@ def close_shift(
     Returns:
         Closed session with variance calculated
     """
-    session = db.session.query(RegisterSession).get(session_id)
+    session = lock_for_update(db.session.query(RegisterSession).filter_by(id=session_id)).first()
 
     if not session:
         raise ShiftError("Session not found")
 
     if session.status != "OPEN":
         raise ShiftError(f"Session already closed")
+
+    if current_user_id is not None and session.user_id != current_user_id and not manager_override:
+        raise ShiftError("Only the session owner can close this shift without manager approval")
 
     # Use expected_cash_cents from session (updated by sales and cash drops)
     expected_cash = session.expected_cash_cents or session.opening_cash_cents
@@ -220,17 +242,31 @@ def close_shift(
     session.variance_cents = variance
     session.notes = notes
 
-    db.session.commit()
-
     # Log drawer close event
     log_drawer_event(
         register_session_id=session.id,
         register_id=session.register_id,
-        user_id=session.user_id,
+        user_id=current_user_id or session.user_id,
         event_type="SHIFT_CLOSE",
         amount_cents=closing_cash_cents,
-        reason=f"Shift closed. Variance: {variance/100:.2f}"
+        reason=f"Shift closed. Variance: {variance/100:.2f}",
+        commit=False,
     )
+
+    append_ledger_event(
+        store_id=session.register.store_id,
+        event_type="register.session_closed",
+        event_category="register",
+        entity_type="register_session",
+        entity_id=session.id,
+        actor_user_id=current_user_id or session.user_id,
+        register_id=session.register_id,
+        register_session_id=session.id,
+        occurred_at=session.closed_at,
+        note=notes,
+    )
+
+    db.session.commit()
 
     return session
 
@@ -263,7 +299,9 @@ def log_drawer_event(
     amount_cents: int | None = None,
     sale_id: int | None = None,
     approved_by_user_id: int | None = None,
-    reason: str | None = None
+    reason: str | None = None,
+    *,
+    commit: bool = True,
 ) -> CashDrawerEvent:
     """
     Log cash drawer event.
@@ -290,7 +328,32 @@ def log_drawer_event(
     )
 
     db.session.add(event)
-    db.session.commit()
+    db.session.flush()
+
+    register = db.session.query(Register).get(register_id)
+    if not register:
+        raise ShiftError("Register not found")
+    store_id = register.store_id
+
+    append_ledger_event(
+        store_id=store_id,
+        event_type=f"cash_drawer.{event_type.lower()}",
+        event_category="cash_drawer",
+        entity_type="cash_drawer_event",
+        entity_id=event.id,
+        actor_user_id=user_id,
+        register_id=register_id,
+        register_session_id=register_session_id,
+        cash_drawer_event_id=event.id,
+        occurred_at=event.occurred_at,
+        note=reason,
+        payload=f"amount_cents={amount_cents}" if amount_cents is not None else None,
+    )
+
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
 
     return event
 
@@ -342,7 +405,7 @@ def cash_drop(
 
     IMPORTANT: Reduces expected_cash_cents in session by the drop amount.
     """
-    session = db.session.query(RegisterSession).get(register_session_id)
+    session = lock_for_update(db.session.query(RegisterSession).filter_by(id=register_session_id)).first()
 
     if not session or session.status != "OPEN":
         raise ShiftError("Session not open")
@@ -352,17 +415,21 @@ def cash_drop(
 
     # Reduce expected cash by drop amount
     session.expected_cash_cents = (session.expected_cash_cents or session.opening_cash_cents) - amount_cents
-    db.session.commit()
 
-    return log_drawer_event(
+    event = log_drawer_event(
         register_session_id=register_session_id,
         register_id=register_id,
         user_id=user_id,
         event_type="CASH_DROP",
         amount_cents=amount_cents,
         approved_by_user_id=approved_by_user_id,
-        reason=reason or f"Cash drop: ${amount_cents/100:.2f}"
+        reason=reason or f"Cash drop: ${amount_cents/100:.2f}",
+        commit=False,
     )
+
+    db.session.commit()
+
+    return event
 
 
 # =============================================================================

@@ -3,8 +3,8 @@
 APOS Phase 5: Document Lifecycle API Routes
 
 These routes handle state transitions for inventory transactions:
-- POST /api/lifecycle/approve/:id - Approve a DRAFT transaction (DRAFT → APPROVED)
-- POST /api/lifecycle/post/:id - Post an APPROVED transaction (APPROVED → POSTED)
+- POST /api/lifecycle/approve/:id - Approve a DRAFT transaction (DRAFT -> APPROVED)
+- POST /api/lifecycle/post/:id - Post an APPROVED transaction (APPROVED -> POSTED)
 - GET /api/lifecycle/pending - List DRAFT transactions needing approval
 - GET /api/lifecycle/approved - List APPROVED transactions ready to post
 
@@ -20,7 +20,7 @@ SECURITY:
 - This prevents spoofing of the audit trail
 """
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 
 from ..models import InventoryTransaction
 from ..services import lifecycle_service
@@ -37,7 +37,7 @@ lifecycle_bp = Blueprint("lifecycle", __name__, url_prefix="/api/lifecycle")
 @require_permission("APPROVE_DOCUMENTS")
 def approve_transaction_route(transaction_id: int):
     """
-    Approve a DRAFT transaction (DRAFT → APPROVED).
+    Approve a DRAFT transaction (DRAFT -> APPROVED).
 
     Requires APPROVE_DOCUMENTS permission.
 
@@ -77,9 +77,9 @@ def approve_transaction_route(transaction_id: int):
     except LifecycleError as e:
         # Invalid state transition
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        # Unexpected error
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to approve transaction")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @lifecycle_bp.post("/post/<int:transaction_id>")
@@ -87,7 +87,7 @@ def approve_transaction_route(transaction_id: int):
 @require_permission("POST_DOCUMENTS")
 def post_transaction_route(transaction_id: int):
     """
-    Post an APPROVED transaction (APPROVED → POSTED).
+    Post an APPROVED transaction (APPROVED -> POSTED).
 
     Requires POST_DOCUMENTS permission.
 
@@ -131,9 +131,9 @@ def post_transaction_route(transaction_id: int):
     except LifecycleError as e:
         # Invalid state transition
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        # Unexpected error
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to post transaction")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @lifecycle_bp.get("/pending")
@@ -158,8 +158,8 @@ def list_pending_transactions_route():
         }
 
     USAGE EXAMPLE:
-        GET /api/lifecycle/pending?store_id=1
-        GET /api/lifecycle/pending?store_id=1&product_id=42&limit=50
+        GET /api/lifecycle/pending'store_id=1
+        GET /api/lifecycle/pending'store_id=1&product_id=42&limit=50
     """
     try:
         store_id = request.args.get("store_id", type=int)
@@ -181,8 +181,9 @@ def list_pending_transactions_route():
             "count": len(transactions),
         }), 200
 
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to list pending transactions")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @lifecycle_bp.get("/approved")
@@ -208,7 +209,7 @@ def list_approved_transactions_route():
         }
 
     USAGE EXAMPLE:
-        GET /api/lifecycle/approved?store_id=1
+        GET /api/lifecycle/approved'store_id=1
     """
     try:
         store_id = request.args.get("store_id", type=int)
@@ -230,8 +231,9 @@ def list_approved_transactions_route():
             "count": len(transactions),
         }), 200
 
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to list approved transactions")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # ================================================================================

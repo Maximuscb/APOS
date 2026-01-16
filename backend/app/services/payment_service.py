@@ -13,9 +13,10 @@ DESIGN PRINCIPLES:
 """
 
 from ..extensions import db
-from ..models import Sale, SaleLine, Payment, PaymentTransaction
+from ..models import Sale, SaleLine, Payment, PaymentTransaction, RegisterSession
 from app.time_utils import utcnow
 from .concurrency import lock_for_update, run_with_retry
+from .ledger_service import append_ledger_event
 
 
 class PaymentError(Exception):
@@ -100,12 +101,32 @@ def add_payment(
         if not sale:
             raise PaymentError(f"Sale {sale_id} not found")
 
+        if sale.status == "VOIDED":
+            raise PaymentError("Cannot add payment to a VOIDED sale")
+
+        # Auto-post draft sale inside the same transaction
+        if sale.status == "DRAFT":
+            from .sales_service import _post_sale_locked, SaleError
+            lines = db.session.query(SaleLine).filter_by(sale_id=sale_id).all()
+            try:
+                _post_sale_locked(sale, lines, actor_user_id=user_id)
+            except SaleError as exc:
+                raise PaymentError(str(exc))
+        elif sale.status != "POSTED":
+            raise PaymentError(f"Cannot add payment to sale with status {sale.status}")
+
         # Calculate sale total from lines
         total_due = calculate_sale_total(sale_id)
 
         # Calculate change (for cash over-tender)
         remaining_due = total_due - sale.total_paid_cents
         change_cents = 0
+
+        if remaining_due <= 0:
+            raise PaymentError("Sale has no remaining balance due")
+
+        if tender_type != TENDER_CASH and amount_cents > remaining_due:
+            raise PaymentError("Non-cash tender cannot exceed remaining balance")
 
         if tender_type == TENDER_CASH and amount_cents > remaining_due:
             change_cents = amount_cents - remaining_due
@@ -138,6 +159,12 @@ def add_payment(
             reason=None,
             register_id=register_id,
             register_session_id=register_session_id
+        )
+
+        _apply_cash_movement(
+            register_session_id=register_session_id,
+            tender_type=tender_type,
+            amount_cents=amount_cents - change_cents,
         )
 
         # Update sale payment status
@@ -238,7 +265,9 @@ def void_payment(
             raise PaymentError(f"Payment {payment_id} already voided")
 
         # Lock sale for status update
-        lock_for_update(db.session.query(Sale).filter_by(id=payment.sale_id)).first()
+        sale = lock_for_update(db.session.query(Sale).filter_by(id=payment.sale_id)).first()
+        if sale and sale.status == "VOIDED":
+            raise PaymentError("Cannot void payment on a VOIDED sale")
 
         # Void payment
         payment.status = "VOIDED"
@@ -257,6 +286,12 @@ def void_payment(
             reason=reason,
             register_id=register_id,
             register_session_id=register_session_id
+        )
+
+        _apply_cash_movement(
+            register_session_id=register_session_id or payment.register_session_id,
+            tender_type=payment.tender_type,
+            amount_cents=-payment.amount_cents + (payment.change_cents or 0),
         )
 
         # Update sale payment status
@@ -304,6 +339,34 @@ def _log_payment_transaction(
     )
 
     db.session.add(transaction)
+    db.session.flush()
+
+    event_type = {
+        "PAYMENT": "payment.created",
+        "VOID": "payment.voided",
+        "REFUND": "payment.refunded",
+    }.get(transaction_type, "payment.event")
+
+    sale = db.session.query(Sale).get(sale_id) if sale_id else None
+    if not sale:
+        raise PaymentError("Sale not found for payment transaction")
+    store_id = sale.store_id
+
+    append_ledger_event(
+        store_id=store_id,
+        event_type=event_type,
+        event_category="payment",
+        entity_type="payment_transaction",
+        entity_id=transaction.id,
+        actor_user_id=user_id,
+        register_id=register_id,
+        register_session_id=register_session_id,
+        sale_id=sale_id,
+        payment_id=payment_id,
+        occurred_at=transaction.occurred_at,
+        note=reason,
+        payload=f"tender_type={tender_type},amount_cents={amount_cents}",
+    )
     return transaction
 
 
@@ -331,11 +394,23 @@ def _update_sale_payment_status(sale_id: int) -> None:
     payments = get_sale_payments(sale_id, include_voided=False)
     total_paid = sum(p.amount_cents - p.change_cents for p in payments)
 
+    # Apply refunds (negative amounts)
+    refund_total = db.session.query(
+        db.func.coalesce(db.func.sum(PaymentTransaction.amount_cents), 0)
+    ).filter(
+        PaymentTransaction.sale_id == sale_id,
+        PaymentTransaction.transaction_type == "REFUND",
+    ).scalar() or 0
+
+    total_paid += int(refund_total)
+
     # Calculate change due (sum of all change given)
     change_due = sum(p.change_cents for p in payments)
 
     # Determine payment status
-    if total_paid == 0:
+    if sale.status == "VOIDED":
+        payment_status = "VOIDED"
+    elif total_paid == 0:
         payment_status = PAYMENT_STATUS_UNPAID
     elif total_paid < total_due:
         payment_status = PAYMENT_STATUS_PARTIAL
@@ -349,6 +424,88 @@ def _update_sale_payment_status(sale_id: int) -> None:
     sale.total_paid_cents = total_paid
     sale.change_due_cents = change_due
     sale.payment_status = payment_status
+
+
+def _apply_cash_movement(
+    *,
+    register_session_id: int | None,
+    tender_type: str,
+    amount_cents: int,
+) -> None:
+    if not register_session_id or tender_type != TENDER_CASH:
+        return
+
+    session = lock_for_update(db.session.query(RegisterSession).filter_by(id=register_session_id)).first()
+    if not session:
+        return
+
+    expected_cash = session.expected_cash_cents if session.expected_cash_cents is not None else session.opening_cash_cents
+    session.expected_cash_cents = expected_cash + amount_cents
+
+
+def refund_payment(
+    payment_id: int,
+    user_id: int,
+    amount_cents: int,
+    tender_type: str,
+    reason: str,
+    register_id: int | None = None,
+    register_session_id: int | None = None,
+) -> PaymentTransaction:
+    """
+    Refund a payment by logging a negative PaymentTransaction.
+    """
+    def _op():
+        if amount_cents <= 0:
+            raise PaymentError("Refund amount must be positive")
+
+        if tender_type not in VALID_TENDER_TYPES:
+            raise PaymentError(f"Invalid tender type: {tender_type}. Must be one of {VALID_TENDER_TYPES}")
+
+        payment = lock_for_update(db.session.query(Payment).filter_by(id=payment_id)).first()
+        if not payment:
+            raise PaymentError(f"Payment {payment_id} not found")
+
+        if payment.status == "VOIDED":
+            raise PaymentError("Cannot refund a voided payment")
+
+        if payment.tender_type != tender_type:
+            raise PaymentError("Refund tender type must match original payment")
+
+        sale = lock_for_update(db.session.query(Sale).filter_by(id=payment.sale_id)).first()
+        if not sale:
+            raise PaymentError(f"Sale {payment.sale_id} not found")
+
+        if sale.status == "VOIDED":
+            raise PaymentError("Cannot refund a VOIDED sale")
+
+        if sale.total_paid_cents is not None and amount_cents > sale.total_paid_cents:
+            raise PaymentError("Refund amount exceeds paid total")
+
+        txn = _log_payment_transaction(
+            payment_id=payment.id,
+            sale_id=payment.sale_id,
+            transaction_type="REFUND",
+            amount_cents=-amount_cents,
+            tender_type=tender_type,
+            user_id=user_id,
+            reason=reason,
+            register_id=register_id or payment.register_id,
+            register_session_id=register_session_id or payment.register_session_id,
+        )
+
+        _apply_cash_movement(
+            register_session_id=register_session_id or payment.register_session_id,
+            tender_type=tender_type,
+            amount_cents=-amount_cents,
+        )
+
+        _update_sale_payment_status(payment.sale_id)
+
+        db.session.commit()
+        return txn
+
+    return run_with_retry(_op)
 
 
 # =============================================================================

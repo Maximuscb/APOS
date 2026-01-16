@@ -16,8 +16,10 @@ LIFECYCLE:
 from __future__ import annotations
 from app.extensions import db
 from app.models import Transfer, TransferLine, InventoryTransaction, Product
-from app.services.inventory_service import get_quantity_on_hand
+from app.services.inventory_service import get_quantity_on_hand, get_weighted_average_cost_cents
 from app.services.concurrency import lock_for_update, run_with_retry
+from app.services.document_service import next_document_number
+from app.services.ledger_service import append_ledger_event
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -60,9 +62,11 @@ def create_transfer(
         if from_store_id == to_store_id:
             raise TransferError("Cannot transfer to the same store")
 
-        # Generate document number
-        count = db.session.query(Transfer).count()
-        document_number = f"T-{str(count + 1).zfill(6)}"
+        document_number = next_document_number(
+            store_id=from_store_id,
+            document_type="TRANSFER",
+            prefix="T",
+        )
 
         transfer = Transfer(
             from_store_id=from_store_id,
@@ -75,6 +79,18 @@ def create_transfer(
 
         db.session.add(transfer)
         db.session.flush()  # Get ID
+
+        append_ledger_event(
+            store_id=from_store_id,
+            event_type="transfer.created",
+            event_category="transfers",
+            entity_type="transfer",
+            entity_id=transfer.id,
+            actor_user_id=user_id,
+            transfer_id=transfer.id,
+            occurred_at=transfer.created_at,
+            note=reason,
+        )
 
         return transfer
 
@@ -179,6 +195,17 @@ def approve_transfer(
         transfer.approved_by_user_id = user_id
         transfer.approved_at = datetime.now(timezone.utc)
 
+        append_ledger_event(
+            store_id=transfer.from_store_id,
+            event_type="transfer.approved",
+            event_category="transfers",
+            entity_type="transfer",
+            entity_id=transfer.id,
+            actor_user_id=user_id,
+            transfer_id=transfer.id,
+            occurred_at=transfer.approved_at,
+        )
+
         return transfer
 
     return run_with_retry(_op)
@@ -220,13 +247,19 @@ def ship_transfer(
                     f"On-hand: {on_hand}, required: {line.quantity}"
                 )
 
+            unit_cost_cents = get_weighted_average_cost_cents(transfer.from_store_id, line.product_id)
+            if unit_cost_cents is None:
+                raise TransferError(f"Cannot transfer product {line.product_id} without cost basis")
+
+            line.unit_cost_cents = unit_cost_cents
+
             # Create negative TRANSFER transaction with IN_TRANSIT state
             out_txn = InventoryTransaction(
                 store_id=transfer.from_store_id,
                 product_id=line.product_id,
                 type="TRANSFER",
                 quantity_delta=-line.quantity,  # Negative: leaving store
-                unit_cost_cents=None,  # Not a RECEIVE
+                unit_cost_cents=unit_cost_cents,
                 status="POSTED",  # Immediately affects inventory
                 inventory_state="IN_TRANSIT",  # In transit to destination
                 posted_by_user_id=user_id,
@@ -240,9 +273,33 @@ def ship_transfer(
             # Link transaction to line
             line.out_transaction_id = out_txn.id
 
+            append_ledger_event(
+                store_id=transfer.from_store_id,
+                event_type="inventory.transfer_out",
+                event_category="inventory",
+                entity_type="inventory_transaction",
+                entity_id=out_txn.id,
+                actor_user_id=user_id,
+                transfer_id=transfer.id,
+                occurred_at=out_txn.posted_at,
+                note=out_txn.note,
+                payload=f"product_id={line.product_id},quantity={line.quantity},unit_cost_cents={unit_cost_cents}",
+            )
+
         transfer.status = TRANSFER_STATUS_IN_TRANSIT
         transfer.shipped_by_user_id = user_id
         transfer.shipped_at = datetime.now(timezone.utc)
+
+        append_ledger_event(
+            store_id=transfer.from_store_id,
+            event_type="transfer.shipped",
+            event_category="transfers",
+            entity_type="transfer",
+            entity_id=transfer.id,
+            actor_user_id=user_id,
+            transfer_id=transfer.id,
+            occurred_at=transfer.shipped_at,
+        )
 
         return transfer
 
@@ -277,13 +334,17 @@ def receive_transfer(
 
         # Create IN transactions at destination store for each line
         for line in transfer.lines:
+            unit_cost_cents = line.unit_cost_cents
+            if unit_cost_cents is None:
+                raise TransferError("Transfer line missing unit cost")
+
             # Create positive TRANSFER transaction with SELLABLE state
             in_txn = InventoryTransaction(
                 store_id=transfer.to_store_id,
                 product_id=line.product_id,
                 type="TRANSFER",
                 quantity_delta=line.quantity,  # Positive: arriving at store
-                unit_cost_cents=None,  # Not a RECEIVE
+                unit_cost_cents=unit_cost_cents,
                 status="POSTED",  # Immediately affects inventory
                 inventory_state="SELLABLE",  # Ready for sale
                 posted_by_user_id=user_id,
@@ -297,9 +358,33 @@ def receive_transfer(
             # Link transaction to line
             line.in_transaction_id = in_txn.id
 
+            append_ledger_event(
+                store_id=transfer.to_store_id,
+                event_type="inventory.transfer_in",
+                event_category="inventory",
+                entity_type="inventory_transaction",
+                entity_id=in_txn.id,
+                actor_user_id=user_id,
+                transfer_id=transfer.id,
+                occurred_at=in_txn.posted_at,
+                note=in_txn.note,
+                payload=f"product_id={line.product_id},quantity={line.quantity},unit_cost_cents={unit_cost_cents}",
+            )
+
         transfer.status = TRANSFER_STATUS_RECEIVED
         transfer.received_by_user_id = user_id
         transfer.received_at = datetime.now(timezone.utc)
+
+        append_ledger_event(
+            store_id=transfer.to_store_id,
+            event_type="transfer.received",
+            event_category="transfers",
+            entity_type="transfer",
+            entity_id=transfer.id,
+            actor_user_id=user_id,
+            transfer_id=transfer.id,
+            occurred_at=transfer.received_at,
+        )
 
         return transfer
 
@@ -340,6 +425,18 @@ def cancel_transfer(
         transfer.cancelled_by_user_id = user_id
         transfer.cancelled_at = datetime.now(timezone.utc)
         transfer.cancellation_reason = reason
+
+        append_ledger_event(
+            store_id=transfer.from_store_id,
+            event_type="transfer.cancelled",
+            event_category="transfers",
+            entity_type="transfer",
+            entity_id=transfer.id,
+            actor_user_id=user_id,
+            transfer_id=transfer.id,
+            occurred_at=transfer.cancelled_at,
+            note=reason,
+        )
 
         return transfer
 

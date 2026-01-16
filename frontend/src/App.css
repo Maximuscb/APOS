@@ -194,6 +194,12 @@
   color: #8e2b24;
 }
 
+.alert--success {
+  border-color: rgba(51, 125, 90, 0.3);
+  background: rgba(51, 125, 90, 0.12);
+  color: #1f5b3f;
+}
+
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

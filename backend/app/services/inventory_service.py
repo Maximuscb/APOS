@@ -122,9 +122,10 @@ def get_weighted_average_cost_cents(
     store_id: int, product_id: int, as_of: datetime | None = None
 ) -> int | None:
     """
-    Calculate weighted average cost from POSTED RECEIVE transactions only.
+    Calculate weighted average cost from POSTED RECEIVE and inbound TRANSFER transactions.
 
-    CRITICAL: Only status='POSTED' AND type='RECEIVE' transactions affect WAC.
+    CRITICAL: Only status='POSTED' AND type in ('RECEIVE', 'TRANSFER') with
+    positive quantity and non-null unit_cost_cents affect WAC.
     DRAFT and APPROVED receive transactions are ignored.
 
     WHY: WAC should only include inventory that's actually been posted to the books.
@@ -139,8 +140,10 @@ def get_weighted_average_cost_cents(
     ).filter(
         InventoryTransaction.store_id == store_id,
         InventoryTransaction.product_id == product_id,
-        InventoryTransaction.type == "RECEIVE",
+        InventoryTransaction.type.in_(["RECEIVE", "TRANSFER"]),
         InventoryTransaction.status == "POSTED",  # Phase 5: Only count posted
+        InventoryTransaction.quantity_delta > 0,
+        InventoryTransaction.unit_cost_cents.isnot(None),
     )
     if as_of is not None:
         q = q.filter(InventoryTransaction.occurred_at <= as_of)
@@ -159,15 +162,19 @@ def get_recent_receive_cost_cents(
     store_id: int, product_id: int, as_of: datetime | None = None
 ) -> int | None:
     """
-    Get the most recent POSTED receive cost.
+    Get the most recent POSTED receive or inbound transfer cost.
 
-    CRITICAL: Only status='POSTED' transactions are considered.
+    CRITICAL: Only status='POSTED' transactions with cost are considered.
     """
     q = InventoryTransaction.query.filter_by(
         store_id=store_id,
         product_id=product_id,
-        type="RECEIVE",
         status="POSTED",  # Phase 5: Only count posted
+    )
+    q = q.filter(
+        InventoryTransaction.type.in_(["RECEIVE", "TRANSFER"]),
+        InventoryTransaction.quantity_delta > 0,
+        InventoryTransaction.unit_cost_cents.isnot(None),
     )
     if as_of is not None:
         q = q.filter(InventoryTransaction.occurred_at <= as_of)
@@ -227,9 +234,11 @@ def receive_inventory(
         if status == "POSTED":
             append_ledger_event(
                 store_id=store_id,
-                event_type="INV_TX_CREATED",
+                event_type="inventory.received",
+                event_category="inventory",
                 entity_type="inventory_transaction",
                 entity_id=tx.id,
+                actor_user_id=tx.posted_by_user_id,
                 occurred_at=tx.occurred_at,
                 note=tx.note,
             )
@@ -295,9 +304,11 @@ def adjust_inventory(
         if status == "POSTED":
             append_ledger_event(
                 store_id=store_id,
-                event_type="INV_TX_CREATED",
+                event_type="inventory.adjusted",
+                event_category="inventory",
                 entity_type="inventory_transaction",
                 entity_id=tx.id,
+                actor_user_id=tx.posted_by_user_id,
                 occurred_at=tx.occurred_at,
                 note=tx.note,
             )
@@ -353,6 +364,8 @@ def sell_inventory(
     occurred_at=None,
     note: str | None = None,
     status: str = "POSTED",  # Phase 5: Sales typically posted immediately
+    commit: bool = True,
+    posted_by_user_id: int | None = None,
 ) -> InventoryTransaction:
     """
     Create a SALE inventory transaction.
@@ -415,6 +428,8 @@ def sell_inventory(
             note=note,
             occurred_at=occurred_dt,
             status=status,  # Phase 5: Lifecycle status
+            posted_by_user_id=posted_by_user_id,
+            posted_at=utcnow() if posted_by_user_id else None,
         )
         db.session.add(tx)
         db.session.flush()
@@ -423,14 +438,19 @@ def sell_inventory(
         if status == "POSTED":
             append_ledger_event(
                 store_id=store_id,
-                event_type="SALE_RECORDED",
+                event_type="inventory.sale_recorded",
+                event_category="inventory",
                 entity_type="inventory_transaction",
                 entity_id=tx.id,
+                actor_user_id=tx.posted_by_user_id,
                 occurred_at=tx.occurred_at,
                 note=tx.note,
             )
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
+        else:
+            db.session.flush()
         return tx
 
     return run_with_retry(_op)

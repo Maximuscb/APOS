@@ -84,6 +84,12 @@ PERMISSION_DEFINITIONS = [
         PermissionCategory.SALES
     ),
     (
+        "REFUND_PAYMENT",
+        "Refund Payment",
+        "Process payment refunds (negative payment transactions)",
+        PermissionCategory.SALES
+    ),
+    (
         "PROCESS_RETURN",
         "Process Return",
         "Process product returns",
@@ -112,13 +118,13 @@ PERMISSION_DEFINITIONS = [
     (
         "APPROVE_DOCUMENTS",
         "Approve Documents",
-        "Approve DRAFT documents (DRAFT → APPROVED)",
+        "Approve DRAFT documents (DRAFT -> APPROVED)",
         PermissionCategory.DOCUMENTS
     ),
     (
         "POST_DOCUMENTS",
         "Post Documents",
-        "Post documents to ledger (APPROVED → POSTED)",
+        "Post documents to ledger (APPROVED -> POSTED)",
         PermissionCategory.DOCUMENTS
     ),
     (
@@ -241,6 +247,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "CREATE_SALE",
         "POST_SALE",
         "VOID_SALE",
+        "REFUND_PAYMENT",
         "PROCESS_RETURN",
         "VIEW_SALES_REPORTS",
         "APPROVE_DOCUMENTS",
@@ -276,6 +283,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "CREATE_SALE",
         "POST_SALE",
         "VOID_SALE",
+        "REFUND_PAYMENT",
         "PROCESS_RETURN",
         "VIEW_SALES_REPORTS",
         "APPROVE_DOCUMENTS",
@@ -309,6 +317,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "CREATE_SALE",
         "POST_SALE",
         "VOID_SALE",  # Manager can void sales
+        "REFUND_PAYMENT",
         "PROCESS_RETURN",
         "VIEW_SALES_REPORTS",
         "APPROVE_DOCUMENTS",

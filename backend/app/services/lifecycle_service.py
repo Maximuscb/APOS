@@ -2,7 +2,7 @@
 APOS Document Lifecycle Service (Phase 5)
 
 ================================================================================
-PURPOSE: Enforce Draft → Approved → Posted lifecycle for inventory transactions
+PURPOSE: Enforce Draft -> Approved -> Posted lifecycle for inventory transactions
 ================================================================================
 
 WHY THIS EXISTS:
@@ -13,15 +13,15 @@ WHY THIS EXISTS:
 - Supports threshold-based controls (future: large adjustments require approval)
 
 STATE MACHINE:
-    DRAFT → APPROVED → POSTED
+    DRAFT -> APPROVED -> POSTED
 
     DRAFT:    Data entry, can be edited/deleted, does NOT affect inventory
     APPROVED: Reviewed, ready to post, but NOT yet affecting inventory
     POSTED:   IMMUTABLE, affects inventory calculations, appends to master ledger
 
 RULES (NON-NEGOTIABLE):
-1. Cannot skip states (DRAFT → POSTED is forbidden)
-2. Cannot reverse states (POSTED → APPROVED is forbidden)
+1. Cannot skip states (DRAFT -> POSTED is forbidden)
+2. Cannot reverse states (POSTED -> APPROVED is forbidden)
 3. Only POSTED transactions affect inventory calculations
 4. POSTED transactions are immutable (cannot be edited/deleted)
 5. Master ledger events are created ONLY on posting, not on draft/approval
@@ -82,13 +82,13 @@ def can_transition(from_status: str, to_status: str) -> bool:
     Check if a state transition is valid according to the lifecycle rules.
 
     Valid transitions:
-    - DRAFT → APPROVED
-    - APPROVED → POSTED
+    - DRAFT -> APPROVED
+    - APPROVED -> POSTED
 
     Invalid transitions:
-    - DRAFT → POSTED (must go through APPROVED)
-    - POSTED → anything (POSTED is terminal and immutable)
-    - APPROVED → DRAFT (no backwards movement)
+    - DRAFT -> POSTED (must go through APPROVED)
+    - POSTED -> anything (POSTED is terminal and immutable)
+    - APPROVED -> DRAFT (no backwards movement)
     - Any transition to the same state (no-op should be handled by caller)
 
     Args:
@@ -122,7 +122,7 @@ def approve_transaction(
     approved_by_user_id: int | None = None,
 ) -> InventoryTransaction:
     """
-    Approve a DRAFT transaction (DRAFT → APPROVED).
+    Approve a DRAFT transaction (DRAFT -> APPROVED).
 
     WHY: Approval indicates that a transaction has been reviewed and is
     ready to be posted. This is the checkpoint before affecting inventory.
@@ -170,7 +170,7 @@ def post_transaction(
     posted_by_user_id: int | None = None,
 ) -> InventoryTransaction:
     """
-    Post an APPROVED transaction (APPROVED → POSTED).
+    Post an APPROVED transaction (APPROVED -> POSTED).
 
     WHY: Posting finalizes the transaction and makes it affect inventory
     calculations. POSTED transactions are immutable and append to the master ledger.

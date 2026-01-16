@@ -9,7 +9,7 @@ SECURITY FEATURES:
 - Session management with token-based auth
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 
 from ..services import auth_service
 from ..services import session_service
@@ -48,8 +48,9 @@ def register_route():
         return jsonify({"error": str(e)}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to register user")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @auth_bp.post("/login")
@@ -140,8 +141,9 @@ def login_route():
             "message": "Login successful"
         }), 200
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to login user")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @auth_bp.get("/lockout-status/<identifier>")
@@ -180,8 +182,9 @@ def logout_route():
 
         return jsonify({"message": "Logout successful"}), 200
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to logout user")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @auth_bp.post("/validate")
@@ -211,8 +214,9 @@ def validate_route():
             "message": "Token valid"
         }), 200
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to validate session")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @auth_bp.post("/roles/init")
@@ -222,8 +226,9 @@ def init_roles_route():
         auth_service.create_default_roles()
         return jsonify({"message": "Default roles created"}), 200
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to init roles")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @auth_bp.post("/users/<int:user_id>/roles")
@@ -242,5 +247,6 @@ def assign_role_route(user_id: int):
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to assign role")
+        return jsonify({"error": "Internal server error"}), 500

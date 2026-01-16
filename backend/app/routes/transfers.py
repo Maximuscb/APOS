@@ -2,7 +2,7 @@
 """
 Phase 11: Inter-store transfer API routes.
 """
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 from app.extensions import db
 from app.decorators import require_auth, require_permission
 from app.services import transfer_service
@@ -52,9 +52,10 @@ def create_transfer():
     except transfer_service.TransferError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to create transfer")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @transfers_bp.route("/<int:transfer_id>/lines", methods=["POST"])
@@ -95,9 +96,10 @@ def add_transfer_line(transfer_id: int):
     except transfer_service.TransferError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to add transfer line")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @transfers_bp.route("/<int:transfer_id>/approve", methods=["POST"])
@@ -126,9 +128,10 @@ def approve_transfer(transfer_id: int):
     except transfer_service.TransferError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to approve transfer")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @transfers_bp.route("/<int:transfer_id>/ship", methods=["POST"])
@@ -158,9 +161,10 @@ def ship_transfer(transfer_id: int):
     except transfer_service.TransferError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to ship transfer")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @transfers_bp.route("/<int:transfer_id>/receive", methods=["POST"])
@@ -190,9 +194,10 @@ def receive_transfer(transfer_id: int):
     except transfer_service.TransferError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to receive transfer")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @transfers_bp.route("/<int:transfer_id>/cancel", methods=["POST"])
@@ -233,9 +238,10 @@ def cancel_transfer(transfer_id: int):
     except transfer_service.TransferError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to cancel transfer")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @transfers_bp.route("/<int:transfer_id>", methods=["GET"])
@@ -255,8 +261,9 @@ def get_transfer(transfer_id: int):
 
     except transfer_service.TransferError as e:
         return jsonify({"error": str(e)}), 404
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to get transfer summary")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @transfers_bp.route("/pending", methods=["GET"])
@@ -276,8 +283,9 @@ def list_pending_transfers():
 
         return jsonify([t.to_dict() for t in transfers]), 200
 
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to list pending transfers")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @transfers_bp.route("/in-transit", methods=["GET"])
@@ -297,8 +305,9 @@ def list_in_transit_transfers():
 
         return jsonify([t.to_dict() for t in transfers]), 200
 
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to list in-transit transfers")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @transfers_bp.route("", methods=["GET"])
@@ -338,5 +347,6 @@ def list_transfers():
 
         return jsonify([t.to_dict() for t in transfers]), 200
 
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to list transfers")
+        return jsonify({"error": "Internal server error"}), 500

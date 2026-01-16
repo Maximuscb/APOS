@@ -1,7 +1,8 @@
 from flask import Blueprint, jsonify, request
 
 from app.decorators import require_auth, require_permission
-from app.services import store_service
+from app.services import store_service, permission_service
+from flask import g
 
 
 stores_bp = Blueprint("stores", __name__, url_prefix="/api/stores")
@@ -73,6 +74,11 @@ def set_store_config(store_id: int):
     data = request.get_json()
     key = data.get("key")
     value = data.get("value")
+    if key == "cash_drawer_approval_mode":
+        if not permission_service.user_has_permission(g.current_user.id, "SYSTEM_ADMIN"):
+            return jsonify({"error": "System admin permission required"}), 403
+        if value is not None and value.upper() not in ["MANAGER_ONLY", "DUAL_AUTH"]:
+            return jsonify({"error": "Invalid cash_drawer_approval_mode value"}), 400
     try:
         config = store_service.set_store_config(store_id, key, value)
         return jsonify(config.to_dict()), 200

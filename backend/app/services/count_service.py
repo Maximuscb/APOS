@@ -17,7 +17,10 @@ from app.extensions import db
 from app.models import Count, CountLine, InventoryTransaction
 from app.services.inventory_service import get_quantity_on_hand, get_weighted_average_cost_cents
 from app.services.concurrency import lock_for_update, run_with_retry
+from app.services.document_service import next_document_number
+from app.services.ledger_service import append_ledger_event
 from datetime import datetime, timezone
+from sqlalchemy.exc import IntegrityError
 
 
 # Count status constants
@@ -61,9 +64,11 @@ def create_count(
         if count_type not in [COUNT_TYPE_CYCLE, COUNT_TYPE_FULL]:
             raise CountError(f"Invalid count type: {count_type}")
 
-        # Generate document number
-        count_num = db.session.query(Count).filter_by(store_id=store_id).count()
-        document_number = f"C-{str(count_num + 1).zfill(6)}"
+        document_number = next_document_number(
+            store_id=store_id,
+            document_type="COUNT",
+            prefix="C",
+        )
 
         count = Count(
             store_id=store_id,
@@ -76,6 +81,18 @@ def create_count(
 
         db.session.add(count)
         db.session.flush()  # Get ID
+
+        append_ledger_event(
+            store_id=store_id,
+            event_type="count.created",
+            event_category="counts",
+            entity_type="count",
+            entity_id=count.id,
+            actor_user_id=user_id,
+            count_id=count.id,
+            occurred_at=count.created_at,
+            note=reason,
+        )
 
         return count
 
@@ -143,7 +160,11 @@ def add_count_line(
         )
 
         db.session.add(line)
-        db.session.flush()
+        try:
+            db.session.flush()
+        except IntegrityError:
+            db.session.rollback()
+            raise CountError(f"Product {product_id} already on this count")
 
         return line
 
@@ -189,6 +210,17 @@ def approve_count(
         count.status = COUNT_STATUS_APPROVED
         count.approved_by_user_id = user_id
         count.approved_at = datetime.now(timezone.utc)
+
+        append_ledger_event(
+            store_id=count.store_id,
+            event_type="count.approved",
+            event_category="counts",
+            entity_type="count",
+            entity_id=count.id,
+            actor_user_id=user_id,
+            count_id=count.id,
+            occurred_at=count.approved_at,
+        )
 
         return count
 
@@ -246,9 +278,33 @@ def post_count(
             # Link transaction to line
             line.inventory_transaction_id = txn.id
 
+            append_ledger_event(
+                store_id=count.store_id,
+                event_type="inventory.count_posted",
+                event_category="inventory",
+                entity_type="inventory_transaction",
+                entity_id=txn.id,
+                actor_user_id=user_id,
+                count_id=count.id,
+                occurred_at=txn.posted_at,
+                note=txn.note,
+                payload=f"product_id={line.product_id},variance_quantity={line.variance_quantity}",
+            )
+
         count.status = COUNT_STATUS_POSTED
         count.posted_by_user_id = user_id
         count.posted_at = datetime.now(timezone.utc)
+
+        append_ledger_event(
+            store_id=count.store_id,
+            event_type="count.posted",
+            event_category="counts",
+            entity_type="count",
+            entity_id=count.id,
+            actor_user_id=user_id,
+            count_id=count.id,
+            occurred_at=count.posted_at,
+        )
 
         return count
 
@@ -289,6 +345,18 @@ def cancel_count(
         count.cancelled_by_user_id = user_id
         count.cancelled_at = datetime.now(timezone.utc)
         count.cancellation_reason = reason
+
+        append_ledger_event(
+            store_id=count.store_id,
+            event_type="count.cancelled",
+            event_category="counts",
+            entity_type="count",
+            entity_id=count.id,
+            actor_user_id=user_id,
+            count_id=count.id,
+            occurred_at=count.cancelled_at,
+            note=reason,
+        )
 
         return count
 

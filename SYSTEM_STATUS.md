@@ -395,6 +395,7 @@
 - ✅ Session token management
 - ✅ User deactivation (soft delete)
 - ✅ Audit trail on all transactions
+- ✅ Security event retention (90 days default) via `flask cleanup-security-events`
 - ✅ User attribution on all documents
 - ⚠️ Rate limiting (not implemented)
 - ⚠️ CSRF protection (not implemented)

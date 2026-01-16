@@ -7,7 +7,7 @@ Provides endpoints for register setup, shift management, and cash drawer trackin
 
 DESIGN:
 - Register CRUD operations (admin/manager only)
-- Shift lifecycle: open → close (immutable once closed)
+- Shift lifecycle: open -> close (immutable once closed)
 - Cash drawer event logging (audit trail)
 - Manager approval required for no-sale opens and cash drops
 
@@ -17,18 +17,37 @@ SECURITY:
 - Manager approval enforced for sensitive drawer operations
 """
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 from sqlalchemy import desc
 
 from ..models import Register, RegisterSession, CashDrawerEvent
 from ..extensions import db
-from ..services import register_service
+from ..services import register_service, permission_service, store_service, session_service
 from ..services.register_service import ShiftError
 from ..decorators import require_auth, require_permission
 from datetime import datetime
 
 
 registers_bp = Blueprint("registers", __name__, url_prefix="/api/registers")
+
+
+def _is_admin() -> bool:
+    return permission_service.user_has_permission(g.current_user.id, "SYSTEM_ADMIN")
+
+
+def _ensure_store_scope(store_id: int | None):
+    if _is_admin():
+        return
+    if g.current_user.store_id and store_id and g.current_user.store_id != store_id:
+        return jsonify({"error": "Store access denied"}), 403
+    return None
+
+
+def _get_cash_drawer_policy(store_id: int) -> str:
+    config = store_service.get_store_config(store_id, "cash_drawer_approval_mode")
+    if not config or not config.value:
+        return "MANAGER_ONLY"
+    return config.value.upper()
 
 
 # =============================================================================
@@ -78,8 +97,9 @@ def create_register_route():
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to create register")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @registers_bp.get("/")
@@ -94,10 +114,16 @@ def list_registers_route():
     """
     store_id = request.args.get("store_id", type=int)
 
+    scope_error = _ensure_store_scope(store_id)
+    if scope_error:
+        return scope_error
+
     query = db.session.query(Register).filter_by(is_active=True)
 
     if store_id:
         query = query.filter_by(store_id=store_id)
+    elif g.current_user.store_id and not _is_admin():
+        query = query.filter_by(store_id=g.current_user.store_id)
 
     registers = query.order_by(Register.register_number).all()
 
@@ -120,6 +146,9 @@ def get_register_route(register_id: int):
 
     if not register:
         return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
 
     # Get current open session if any
     current_session = db.session.query(RegisterSession).filter_by(
@@ -170,9 +199,10 @@ def update_register_route(register_id: int):
 
         return jsonify({"register": register.to_dict()}), 200
 
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": str(e)}), 500
+        current_app.logger.exception("Failed to update register")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # =============================================================================
@@ -203,6 +233,13 @@ def open_shift_route(register_id: int):
         if opening_cash_cents < 0:
             return jsonify({"error": "opening_cash_cents cannot be negative"}), 400
 
+        register = db.session.query(Register).get(register_id)
+        if not register:
+            return jsonify({"error": "Register not found"}), 404
+        scope_error = _ensure_store_scope(register.store_id)
+        if scope_error:
+            return scope_error
+
         session = register_service.open_shift(
             register_id=register_id,
             user_id=g.current_user.id,
@@ -215,8 +252,9 @@ def open_shift_route(register_id: int):
         return jsonify({"error": str(e)}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to open shift")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @registers_bp.post("/sessions/<int:session_id>/close")
@@ -249,10 +287,21 @@ def close_shift_route(session_id: int):
         if closing_cash_cents < 0:
             return jsonify({"error": "closing_cash_cents cannot be negative"}), 400
 
+        session = db.session.query(RegisterSession).get(session_id)
+        if not session:
+            return jsonify({"error": "Session not found"}), 404
+        scope_error = _ensure_store_scope(session.register.store_id)
+        if scope_error:
+            return scope_error
+
+        manager_override = permission_service.user_has_permission(g.current_user.id, "MANAGE_REGISTER")
+
         session = register_service.close_shift(
             session_id=session_id,
             closing_cash_cents=closing_cash_cents,
-            notes=notes
+            notes=notes,
+            current_user_id=g.current_user.id,
+            manager_override=manager_override,
         )
 
         return jsonify({"session": session.to_dict()}), 200
@@ -261,13 +310,14 @@ def close_shift_route(session_id: int):
         return jsonify({"error": str(e)}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to close shift")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @registers_bp.get("/sessions/<int:session_id>")
 @require_auth
-@require_permission("CREATE_SALE")
+@require_permission("MANAGE_REGISTER")
 def get_session_route(session_id: int):
     """
     Get session details with all drawer events.
@@ -279,6 +329,9 @@ def get_session_route(session_id: int):
 
     if not session:
         return jsonify({"error": "Session not found"}), 404
+    scope_error = _ensure_store_scope(session.register.store_id)
+    if scope_error:
+        return scope_error
 
     # Get all drawer events for this session
     events = db.session.query(CashDrawerEvent).filter_by(
@@ -293,7 +346,7 @@ def get_session_route(session_id: int):
 
 @registers_bp.get("/<int:register_id>/sessions")
 @require_auth
-@require_permission("CREATE_SALE")
+@require_permission("MANAGE_REGISTER")
 def list_sessions_route(register_id: int):
     """
     List all sessions for a register.
@@ -309,6 +362,12 @@ def list_sessions_route(register_id: int):
     limit = request.args.get("limit", 50, type=int)
 
     query = db.session.query(RegisterSession).filter_by(register_id=register_id)
+    register = db.session.query(Register).get(register_id)
+    if not register:
+        return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
 
     if status:
         query = query.filter_by(status=status)
@@ -353,11 +412,28 @@ def no_sale_drawer_open_route(session_id: int):
             return jsonify({"error": "Session is not open"}), 400
 
         data = request.get_json()
-        approved_by_user_id = data.get("approved_by_user_id")
         reason = data.get("reason")
+        manager_token = data.get("manager_token")
 
-        if not all([approved_by_user_id, reason]):
-            return jsonify({"error": "approved_by_user_id and reason required"}), 400
+        if not reason:
+            return jsonify({"error": "reason required"}), 400
+
+        policy = _get_cash_drawer_policy(session.register.store_id)
+        approved_by_user_id = None
+
+        if policy == "DUAL_AUTH":
+            if not manager_token:
+                return jsonify({"error": "manager_token required for dual-auth policy"}), 400
+            manager_user = session_service.validate_session(manager_token)
+            if not manager_user:
+                return jsonify({"error": "Invalid manager token"}), 403
+            if not permission_service.user_has_permission(manager_user.id, "MANAGE_REGISTER"):
+                return jsonify({"error": "Manager permission required for approval"}), 403
+            approved_by_user_id = manager_user.id
+        else:
+            if not permission_service.user_has_permission(g.current_user.id, "MANAGE_REGISTER"):
+                return jsonify({"error": "Manager permission required"}), 403
+            approved_by_user_id = g.current_user.id
 
         event = register_service.open_drawer_no_sale(
             register_session_id=session_id,
@@ -371,8 +447,9 @@ def no_sale_drawer_open_route(session_id: int):
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to log no-sale drawer open")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @registers_bp.post("/sessions/<int:session_id>/drawer/cash-drop")
@@ -406,14 +483,31 @@ def cash_drop_route(session_id: int):
 
         data = request.get_json()
         amount_cents = data.get("amount_cents")
-        approved_by_user_id = data.get("approved_by_user_id")
         reason = data.get("reason")
+        manager_token = data.get("manager_token")
 
-        if not all([amount_cents, approved_by_user_id, reason]):
-            return jsonify({"error": "amount_cents, approved_by_user_id, and reason required"}), 400
+        if not all([amount_cents, reason]):
+            return jsonify({"error": "amount_cents and reason required"}), 400
 
         if amount_cents <= 0:
             return jsonify({"error": "amount_cents must be positive"}), 400
+
+        policy = _get_cash_drawer_policy(session.register.store_id)
+        approved_by_user_id = None
+
+        if policy == "DUAL_AUTH":
+            if not manager_token:
+                return jsonify({"error": "manager_token required for dual-auth policy"}), 400
+            manager_user = session_service.validate_session(manager_token)
+            if not manager_user:
+                return jsonify({"error": "Invalid manager token"}), 403
+            if not permission_service.user_has_permission(manager_user.id, "MANAGE_REGISTER"):
+                return jsonify({"error": "Manager permission required for approval"}), 403
+            approved_by_user_id = manager_user.id
+        else:
+            if not permission_service.user_has_permission(g.current_user.id, "MANAGE_REGISTER"):
+                return jsonify({"error": "Manager permission required"}), 403
+            approved_by_user_id = g.current_user.id
 
         event = register_service.cash_drop(
             register_session_id=session_id,
@@ -428,8 +522,9 @@ def cash_drop_route(session_id: int):
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to record cash drop")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # =============================================================================
@@ -438,7 +533,7 @@ def cash_drop_route(session_id: int):
 
 @registers_bp.get("/<int:register_id>/events")
 @require_auth
-@require_permission("CREATE_SALE")
+@require_permission("MANAGE_REGISTER")
 def list_drawer_events_route(register_id: int):
     """
     List all drawer events for a register.
@@ -456,6 +551,13 @@ def list_drawer_events_route(register_id: int):
     start_date = request.args.get("start_date")
     end_date = request.args.get("end_date")
     limit = request.args.get("limit", 100, type=int)
+
+    register = db.session.query(Register).get(register_id)
+    if not register:
+        return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
 
     query = db.session.query(CashDrawerEvent).filter_by(register_id=register_id)
 

@@ -17,7 +17,7 @@ SECURITY:
 - All operations logged with user attribution
 """
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 
 from ..models import Return, ReturnLine
 from ..extensions import db
@@ -85,8 +85,9 @@ def create_return_route():
 
     except ReturnError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to create return")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @returns_bp.post("/<int:return_id>/lines")
@@ -134,8 +135,9 @@ def add_return_line_route(return_id: int):
 
     except ReturnError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to add return line")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # =============================================================================
@@ -170,8 +172,9 @@ def approve_return_route(return_id: int):
 
     except ReturnError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to approve return")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @returns_bp.post("/<int:return_id>/reject")
@@ -216,8 +219,9 @@ def reject_return_route(return_id: int):
 
     except ReturnError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to reject return")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # =============================================================================
@@ -265,8 +269,9 @@ def complete_return_route(return_id: int):
 
     except ReturnError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to complete return")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # =============================================================================
@@ -295,8 +300,9 @@ def get_return_route(return_id: int):
 
     except ReturnError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to load return summary")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @returns_bp.get("/sales/<int:sale_id>")

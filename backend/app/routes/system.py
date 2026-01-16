@@ -50,10 +50,11 @@ def check_database_health() -> dict:
         }
     except Exception as e:
         elapsed_ms = (time.time() - start_time) * 1000
+        current_app.logger.exception("Database health check failed")
         return {
             "status": "unhealthy",
             "latency_ms": round(elapsed_ms, 2),
-            "error": str(e)
+            "error": "Database error"
         }
 
 
@@ -87,10 +88,11 @@ def check_session_service_health() -> dict:
         }
     except Exception as e:
         elapsed_ms = (time.time() - start_time) * 1000
+        current_app.logger.exception("Session service health check failed")
         return {
             "status": "unhealthy",
             "latency_ms": round(elapsed_ms, 2),
-            "error": str(e)
+            "error": "Session service error"
         }
 
 
@@ -136,10 +138,11 @@ def check_auth_service_health() -> dict:
         }
     except Exception as e:
         elapsed_ms = (time.time() - start_time) * 1000
+        current_app.logger.exception("Auth service health check failed")
         return {
             "status": "unhealthy",
             "latency_ms": round(elapsed_ms, 2),
-            "error": str(e)
+            "error": "Auth service error"
         }
 
 

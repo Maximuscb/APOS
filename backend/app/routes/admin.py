@@ -10,7 +10,7 @@ Provides endpoints for:
 All endpoints require authentication and appropriate permissions.
 """
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 
 from ..extensions import db
 from ..models import User, Role, UserRole, Permission, RolePermission
@@ -153,8 +153,9 @@ def create_user():
         return jsonify({"error": str(e)}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to create user")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @admin_bp.patch("/users/<int:user_id>")

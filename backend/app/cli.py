@@ -17,6 +17,7 @@ from .extensions import db
 from .models import Store, User, Role, UserRole, Permission, RolePermission
 from .services.auth_service import create_user, create_default_roles, assign_role, PasswordValidationError
 from .services import permission_service
+from .services import maintenance_service
 from .permissions import PERMISSION_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS
 
 
@@ -34,7 +35,7 @@ def init_system():
 
     SECURITY: Change passwords immediately in production!
     """
-    click.echo("🚀 Initializing APOS system...")
+    click.echo("START Initializing APOS system...")
 
     # 1. Ensure default store exists
     store = db.session.query(Store).first()
@@ -42,24 +43,24 @@ def init_system():
         store = Store(name="Main Store")
         db.session.add(store)
         db.session.commit()
-        click.echo(f"✅ Created default store: {store.name} (ID: {store.id})")
+        click.echo(f"PASS Created default store: {store.name} (ID: {store.id})")
     else:
-        click.echo(f"✅ Using existing store: {store.name} (ID: {store.id})")
+        click.echo(f"PASS Using existing store: {store.name} (ID: {store.id})")
 
     # 2. Create roles
-    click.echo("\n📋 Creating roles...")
+    click.echo("\nLIST Creating roles...")
     create_default_roles()
     roles = db.session.query(Role).all()
-    click.echo(f"✅ Roles created: {', '.join(r.name for r in roles)}")
+    click.echo(f"PASS Roles created: {', '.join(r.name for r in roles)}")
 
     # 2.5. Initialize permissions (Phase 7)
-    click.echo("\n🔐 Initializing permissions...")
+    click.echo("\nSECURITY Initializing permissions...")
     perm_count = permission_service.initialize_permissions()
     assignment_count = permission_service.assign_default_role_permissions()
-    click.echo(f"✅ Created {perm_count} permissions, {assignment_count} role assignments")
+    click.echo(f"PASS Created {perm_count} permissions, {assignment_count} role assignments")
 
     # 3. Create default users
-    click.echo("\n👥 Creating default users...")
+    click.echo("\nUSERS Creating default users...")
 
     # Default password meets Phase 6 requirements:
     # - Minimum 8 characters
@@ -78,7 +79,7 @@ def init_system():
             # Check if user exists
             existing = db.session.query(User).filter_by(username=username).first()
             if existing:
-                click.echo(f"⚠️  User '{username}' already exists, skipping...")
+                click.echo(f"WARN  User '{username}' already exists, skipping...")
                 continue
 
             # Create user (password will be hashed with bcrypt and validated)
@@ -87,22 +88,22 @@ def init_system():
             # Assign role
             assign_role(user.id, role_name)
 
-            click.echo(f"✅ Created user: {username} ({email}) with role '{role_name}'")
+            click.echo(f"PASS Created user: {username} ({email}) with role '{role_name}'")
 
         except PasswordValidationError as e:
-            click.echo(f"❌ Password validation failed for '{username}': {str(e)}")
+            click.echo(f"FAIL Password validation failed for '{username}': {str(e)}")
         except Exception as e:
-            click.echo(f"❌ Failed to create user '{username}': {str(e)}")
+            click.echo(f"FAIL Failed to create user '{username}': {str(e)}")
 
     click.echo("\n" + "="*60)
-    click.echo("✨ APOS System Initialized Successfully!")
+    click.echo("DONE APOS System Initialized Successfully!")
     click.echo("="*60)
-    click.echo("\n📝 Default Credentials (CHANGE IN PRODUCTION!):")
-    click.echo("   admin     → admin@apos.local     / Password123!")
-    click.echo("   developer → developer@apos.local / Password123!")
-    click.echo("   manager   → manager@apos.local   / Password123!")
-    click.echo("   cashier   → cashier@apos.local   / Password123!")
-    click.echo("\n🔒 SECURITY WARNING:")
+    click.echo("\nDefault Credentials (CHANGE IN PRODUCTION!):")
+    click.echo("   admin     -> admin@apos.local     / Password123!")
+    click.echo("   developer -> developer@apos.local / Password123!")
+    click.echo("   manager   -> manager@apos.local   / Password123!")
+    click.echo("   cashier   -> cashier@apos.local   / Password123!")
+    click.echo("\nSECURITY SECURITY WARNING:")
     click.echo("   - Passwords are now hashed with bcrypt (secure)")
     click.echo("   - Change all passwords immediately in production!")
     click.echo("   - Password requirements: 8+ chars, uppercase, lowercase, digit, special char")
@@ -113,10 +114,10 @@ def init_system():
 @with_appcontext
 def init_roles():
     """Create default roles (admin, manager, cashier)."""
-    click.echo("📋 Creating default roles...")
+    click.echo("LIST Creating default roles...")
     create_default_roles()
     roles = db.session.query(Role).all()
-    click.echo(f"✅ Created roles: {', '.join(r.name for r in roles)}")
+    click.echo(f"PASS Created roles: {', '.join(r.name for r in roles)}")
 
 
 @click.command('create-user')
@@ -140,7 +141,7 @@ def create_user_cli(username, email, password, role):
         # Get default store
         store = db.session.query(Store).first()
         if not store:
-            click.echo("❌ No store found. Run 'flask init-system' first.")
+            click.echo("FAIL No store found. Run 'flask init-system' first.")
             return
 
         # Create user (password will be hashed with bcrypt and validated)
@@ -149,14 +150,14 @@ def create_user_cli(username, email, password, role):
         # Assign role
         assign_role(user.id, role)
 
-        click.echo(f"✅ Created user: {username} ({email}) with role '{role}'")
-        click.echo("🔒 Password securely hashed with bcrypt")
+        click.echo(f"PASS Created user: {username} ({email}) with role '{role}'")
+        click.echo("SECURITY Password securely hashed with bcrypt")
 
     except PasswordValidationError as e:
-        click.echo(f"❌ Password validation failed: {str(e)}")
+        click.echo(f"FAIL Password validation failed: {str(e)}")
         click.echo("Requirements: 8+ chars, uppercase, lowercase, digit, special char")
     except Exception as e:
-        click.echo(f"❌ Failed to create user: {str(e)}")
+        click.echo(f"FAIL Failed to create user: {str(e)}")
 
 
 @click.command('list-users')
@@ -200,15 +201,15 @@ def reset_db(yes):
     This will DELETE ALL DATA!
     """
     if not yes:
-        click.confirm('⚠️  This will DELETE ALL DATA. Are you sure?', abort=True)
+        click.confirm("WARN This will DELETE ALL DATA. Are you sure?", abort=True)
 
-    click.echo("🗑️  Dropping all tables...")
+    click.echo("DELETE  Dropping all tables...")
     db.drop_all()
 
-    click.echo("🏗️  Creating all tables...")
+    click.echo("BUILD  Creating all tables...")
     db.create_all()
 
-    click.echo("✅ Database reset complete. Run 'flask init-system' to initialize.")
+    click.echo("PASS Database reset complete. Run 'flask init-system' to initialize.")
 
 
 # =============================================================================
@@ -224,34 +225,34 @@ def init_permissions():
     Creates all permissions and assigns default permissions to roles.
     Safe to run multiple times (idempotent).
     """
-    click.echo("🔐 Phase 7: Initializing Permission System...")
+    click.echo("SECURITY Phase 7: Initializing Permission System...")
     click.echo("")
 
     # 1. Create all permission definitions
-    click.echo("📋 Creating permissions...")
+    click.echo("LIST Creating permissions...")
     perm_count = permission_service.initialize_permissions()
-    click.echo(f"✅ Created {perm_count} new permissions")
+    click.echo(f"PASS Created {perm_count} new permissions")
 
     total_perms = db.session.query(Permission).count()
     click.echo(f"   Total permissions in system: {total_perms}")
 
     # 2. Assign default permissions to roles
-    click.echo("\n🔗 Assigning default permissions to roles...")
+    click.echo("\nLINK Assigning default permissions to roles...")
     assignment_count = permission_service.assign_default_role_permissions()
-    click.echo(f"✅ Created {assignment_count} new role-permission assignments")
+    click.echo(f"PASS Created {assignment_count} new role-permission assignments")
 
     # 3. Show summary
-    click.echo("\n📊 Permission Summary by Role:")
+    click.echo("\nSTATS Permission Summary by Role:")
     click.echo("="*60)
 
     for role_name in ["admin", "manager", "cashier"]:
         role = db.session.query(Role).filter_by(name=role_name).first()
         if role:
             role_perms = db.session.query(RolePermission).filter_by(role_id=role.id).all()
-            click.echo(f"  {role_name.upper():<10} → {len(role_perms)} permissions")
+            click.echo(f"  {role_name.upper():<10} -> {len(role_perms)} permissions")
 
     click.echo("="*60)
-    click.echo("\n✅ Permission system initialized successfully!")
+    click.echo("\nPASS Permission system initialized successfully!")
     click.echo("   Users with these roles now have enforced permissions.")
     click.echo("")
 
@@ -266,7 +267,7 @@ def list_permissions_cli(role, category):
         # Show permissions for a specific role
         role_obj = db.session.query(Role).filter_by(name=role).first()
         if not role_obj:
-            click.echo(f"❌ Role '{role}' not found")
+            click.echo(f"FAIL Role '{role}' not found")
             return
 
         role_perms = db.session.query(RolePermission).filter_by(role_id=role_obj.id).all()
@@ -314,7 +315,7 @@ def list_permissions_cli(role, category):
             if perm.category != current_category:
                 if current_category:
                     click.echo("")
-                click.echo(f"📁 {perm.category}")
+                click.echo(f"CATEGORY {perm.category}")
                 click.echo("-"*80)
                 current_category = perm.category
 
@@ -331,9 +332,9 @@ def grant_permission_cli(role_name, permission_code):
     """Grant a permission to a role."""
     try:
         permission_service.grant_permission_to_role(role_name, permission_code)
-        click.echo(f"✅ Granted '{permission_code}' to role '{role_name}'")
+        click.echo(f"PASS Granted '{permission_code}' to role '{role_name}'")
     except ValueError as e:
-        click.echo(f"❌ Error: {str(e)}")
+        click.echo(f"FAIL Error: {str(e)}")
 
 
 @click.command('revoke-permission')
@@ -345,11 +346,11 @@ def revoke_permission_cli(role_name, permission_code):
     try:
         revoked = permission_service.revoke_permission_from_role(role_name, permission_code)
         if revoked:
-            click.echo(f"✅ Revoked '{permission_code}' from role '{role_name}'")
+            click.echo(f"PASS Revoked '{permission_code}' from role '{role_name}'")
         else:
-            click.echo(f"⚠️  Permission '{permission_code}' was not granted to '{role_name}'")
+            click.echo(f"WARN  Permission '{permission_code}' was not granted to '{role_name}'")
     except ValueError as e:
-        click.echo(f"❌ Error: {str(e)}")
+        click.echo(f"FAIL Error: {str(e)}")
 
 
 @click.command('check-permission')
@@ -361,15 +362,15 @@ def check_permission_cli(username, permission_code):
     user = db.session.query(User).filter_by(username=username).first()
 
     if not user:
-        click.echo(f"❌ User '{username}' not found")
+        click.echo(f"FAIL User '{username}' not found")
         return
 
     has_permission = permission_service.user_has_permission(user.id, permission_code)
 
     if has_permission:
-        click.echo(f"✅ User '{username}' HAS permission '{permission_code}'")
+        click.echo(f"PASS User '{username}' HAS permission '{permission_code}'")
     else:
-        click.echo(f"❌ User '{username}' DOES NOT HAVE permission '{permission_code}'")
+        click.echo(f"FAIL User '{username}' DOES NOT HAVE permission '{permission_code}'")
 
     # Show user's roles and all permissions
     roles = permission_service.get_user_role_names(user.id)
@@ -409,15 +410,15 @@ def create_register_cli(store_id, number, name, location, device_id):
             device_id=device_id
         )
 
-        click.echo(f"✅ Created register: {register.register_number} - {register.name}")
+        click.echo(f"PASS Created register: {register.register_number} - {register.name}")
         click.echo(f"   Store ID: {register.store_id}")
         click.echo(f"   Location: {register.location or 'Not specified'}")
         click.echo(f"   Register ID: {register.id}")
 
     except ValueError as e:
-        click.echo(f"❌ Error: {str(e)}")
+        click.echo(f"FAIL Error: {str(e)}")
     except Exception as e:
-        click.echo(f"❌ Failed to create register: {str(e)}")
+        click.echo(f"FAIL Failed to create register: {str(e)}")
 
 
 @click.command('list-registers')
@@ -488,7 +489,7 @@ def open_shift_cli(register_id, username, opening_cash):
         # Find user
         user = db.session.query(User).filter_by(username=username).first()
         if not user:
-            click.echo(f"❌ User '{username}' not found")
+            click.echo(f"FAIL User '{username}' not found")
             return
 
         # Convert dollars to cents
@@ -500,7 +501,7 @@ def open_shift_cli(register_id, username, opening_cash):
             opening_cash_cents=opening_cash_cents
         )
 
-        click.echo(f"✅ Shift opened successfully!")
+        click.echo(f"PASS Shift opened successfully!")
         click.echo(f"   Session ID: {session.id}")
         click.echo(f"   Register ID: {session.register_id}")
         click.echo(f"   User: {username}")
@@ -508,11 +509,11 @@ def open_shift_cli(register_id, username, opening_cash):
         click.echo(f"   Opened At: {session.opened_at}")
 
     except ShiftError as e:
-        click.echo(f"❌ Shift Error: {str(e)}")
+        click.echo(f"FAIL Shift Error: {str(e)}")
     except ValueError as e:
-        click.echo(f"❌ Error: {str(e)}")
+        click.echo(f"FAIL Error: {str(e)}")
     except Exception as e:
-        click.echo(f"❌ Failed to open shift: {str(e)}")
+        click.echo(f"FAIL Failed to open shift: {str(e)}")
 
 
 @click.command('close-shift')
@@ -545,7 +546,7 @@ def close_shift_cli(session_id, closing_cash, notes):
         closing = session.closing_cash_cents / 100
         variance = session.variance_cents / 100
 
-        click.echo(f"✅ Shift closed successfully!")
+        click.echo(f"PASS Shift closed successfully!")
         click.echo(f"   Session ID: {session.id}")
         click.echo(f"   Opening Cash: ${opening:.2f}")
         click.echo(f"   Expected Cash: ${expected:.2f}")
@@ -554,21 +555,21 @@ def close_shift_cli(session_id, closing_cash, notes):
 
         if abs(variance) > 0:
             if variance > 0:
-                click.echo(f"   ⚠️  OVER by ${abs(variance):.2f}")
+                click.echo(f"   WARN  OVER by ${abs(variance):.2f}")
             else:
-                click.echo(f"   ⚠️  SHORT by ${abs(variance):.2f}")
+                click.echo(f"   WARN  SHORT by ${abs(variance):.2f}")
         else:
-            click.echo(f"   ✅ Cash balanced perfectly!")
+            click.echo(f"   PASS Cash balanced perfectly!")
 
         if session.notes:
             click.echo(f"   Notes: {session.notes}")
 
     except ShiftError as e:
-        click.echo(f"❌ Shift Error: {str(e)}")
+        click.echo(f"FAIL Shift Error: {str(e)}")
     except ValueError as e:
-        click.echo(f"❌ Error: {str(e)}")
+        click.echo(f"FAIL Error: {str(e)}")
     except Exception as e:
-        click.echo(f"❌ Failed to close shift: {str(e)}")
+        click.echo(f"FAIL Failed to close shift: {str(e)}")
 
 
 @click.command('list-sessions')
@@ -625,6 +626,19 @@ def list_sessions_cli(register_id, status, limit):
     click.echo("="*120 + "\n")
 
 
+@click.command('cleanup-security-events')
+@click.option('--retention-days', type=int, default=90, show_default=True)
+@with_appcontext
+def cleanup_security_events_cli(retention_days):
+    """
+    Cleanup old security events.
+
+    Default retention: 90 days.
+    """
+    deleted = maintenance_service.cleanup_security_events(retention_days=retention_days)
+    click.echo(f"Deleted {deleted} security events older than {retention_days} days.")
+
+
 def register_commands(app):
     """Register all CLI commands with Flask app."""
     app.cli.add_command(init_system)
@@ -646,3 +660,6 @@ def register_commands(app):
     app.cli.add_command(open_shift_cli)
     app.cli.add_command(close_shift_cli)
     app.cli.add_command(list_sessions_cli)
+
+    # Maintenance
+    app.cli.add_command(cleanup_security_events_cli)

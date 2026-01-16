@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from app import create_app
 from app.extensions import db
 from app.models import Store, User, Product, Sale, SaleLine, Payment, PaymentTransaction, RegisterSession, Register
-from app.services import payment_service, sales_service
+from app.services import payment_service, sales_service, inventory_service
 from app.services.payment_service import PaymentError
 
 
@@ -28,9 +28,9 @@ class PaymentSystemTest(unittest.TestCase):
 
     def setUp(self):
         """Set up test app and database before each test."""
+        os.environ["DATABASE_URL"] = "sqlite:///:memory:"
         self.app = create_app()
         self.app.config['TESTING'] = True
-        self.app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
 
         with self.app.app_context():
             db.create_all()
@@ -76,6 +76,15 @@ class PaymentSystemTest(unittest.TestCase):
             db.session.commit()
             self.product_id = product.id
 
+            inventory_service.receive_inventory(
+                store_id=self.store_id,
+                product_id=self.product_id,
+                quantity=200,
+                unit_cost_cents=500,
+                note="Test seed inventory",
+                status="POSTED",
+            )
+
     def tearDown(self):
         """Clean up database after each test."""
         with self.app.app_context():
@@ -112,7 +121,29 @@ class PaymentSystemTest(unittest.TestCase):
             self.assertEqual(txns[0].transaction_type, "PAYMENT")
             self.assertEqual(txns[0].amount_cents, 4000)
 
-            print("✅ test_create_cash_payment: Cash payment created correctly")
+            print("PASS test_create_cash_payment: Cash payment created correctly")
+
+    def test_auto_post_on_payment(self):
+        """Test that draft sales are auto-posted when payment is added."""
+        with self.app.app_context():
+            sale = sales_service.create_sale(self.store_id, self.cashier_id)
+            sales_service.add_line(sale.id, self.product_id, 1)
+
+            payment_service.add_payment(
+                sale_id=sale.id,
+                user_id=self.cashier_id,
+                tender_type=payment_service.TENDER_CARD,
+                amount_cents=2000
+            )
+
+            db.session.refresh(sale)
+            self.assertEqual(sale.status, "POSTED")
+            self.assertIsNotNone(sale.completed_at)
+
+            lines = db.session.query(SaleLine).filter_by(sale_id=sale.id).all()
+            self.assertTrue(all(line.inventory_transaction_id for line in lines))
+
+            print("Auto-post on payment ok")
 
     def test_cash_payment_with_change(self):
         """Test cash payment with change calculation."""
@@ -138,7 +169,25 @@ class PaymentSystemTest(unittest.TestCase):
             self.assertEqual(sale.total_paid_cents, 4000)  # $40 applied to sale (after change)
             self.assertEqual(sale.change_due_cents, 1000)  # $10 change
 
-            print("✅ test_cash_payment_with_change: Change calculated correctly")
+            print("PASS test_cash_payment_with_change: Change calculated correctly")
+
+    def test_non_cash_overpay_rejected(self):
+        """Test that non-cash overpayment is rejected."""
+        with self.app.app_context():
+            sale = sales_service.create_sale(self.store_id, self.cashier_id)
+            sales_service.add_line(sale.id, self.product_id, 1)
+
+            with self.assertRaises(PaymentError) as context:
+                payment_service.add_payment(
+                    sale_id=sale.id,
+                    user_id=self.cashier_id,
+                    tender_type=payment_service.TENDER_CARD,
+                    amount_cents=3000
+                )
+
+            self.assertIn("non-cash", str(context.exception).lower())
+
+            print("Non-cash overpay rejected")
 
     def test_create_card_payment(self):
         """Test creating a card payment."""
@@ -159,7 +208,7 @@ class PaymentSystemTest(unittest.TestCase):
             self.assertEqual(payment.reference_number, "AUTH-12345")
             self.assertEqual(payment.change_cents, 0)  # No change for cards
 
-            print("✅ test_create_card_payment: Card payment created correctly")
+            print("PASS test_create_card_payment: Card payment created correctly")
 
     # =========================================================================
     # SPLIT PAYMENT TESTS
@@ -202,7 +251,38 @@ class PaymentSystemTest(unittest.TestCase):
             payments = payment_service.get_sale_payments(sale.id)
             self.assertEqual(len(payments), 2)
 
-            print("✅ test_split_payment_cash_and_card: Split payment works correctly")
+            print("PASS test_split_payment_cash_and_card: Split payment works correctly")
+
+    def test_void_one_of_multiple_payments(self):
+        """Test voiding one of multiple payments updates totals correctly."""
+        with self.app.app_context():
+            sale = sales_service.create_sale(self.store_id, self.cashier_id)
+            sales_service.add_line(sale.id, self.product_id, 3)
+
+            payment1 = payment_service.add_payment(
+                sale_id=sale.id,
+                user_id=self.cashier_id,
+                tender_type=payment_service.TENDER_CASH,
+                amount_cents=3000
+            )
+            payment_service.add_payment(
+                sale_id=sale.id,
+                user_id=self.cashier_id,
+                tender_type=payment_service.TENDER_CARD,
+                amount_cents=3000
+            )
+
+            payment_service.void_payment(
+                payment_id=payment1.id,
+                user_id=self.manager_id,
+                reason="Cash error"
+            )
+
+            db.session.refresh(sale)
+            self.assertEqual(sale.total_paid_cents, 3000)
+            self.assertEqual(sale.payment_status, "PARTIAL")
+
+            print("Void one of multiple payments ok")
 
     def test_partial_payment(self):
         """Test partial payment (layaway scenario)."""
@@ -227,7 +307,7 @@ class PaymentSystemTest(unittest.TestCase):
             remaining = payment_service.get_sale_remaining_balance(sale.id)
             self.assertEqual(remaining, 6000)  # $60.00 remaining
 
-            print("✅ test_partial_payment: Partial payment tracking works")
+            print("PASS test_partial_payment: Partial payment tracking works")
 
     # =========================================================================
     # PAYMENT STATUS TESTS
@@ -243,7 +323,7 @@ class PaymentSystemTest(unittest.TestCase):
             self.assertEqual(sale.payment_status, "UNPAID")
             self.assertEqual(sale.total_paid_cents, 0)
 
-            print("✅ test_payment_status_unpaid: UNPAID status correct")
+            print("PASS test_payment_status_unpaid: UNPAID status correct")
 
     def test_payment_status_paid(self):
         """Test PAID status."""
@@ -263,7 +343,7 @@ class PaymentSystemTest(unittest.TestCase):
             self.assertEqual(sale.payment_status, "PAID")
             self.assertEqual(sale.total_paid_cents, 2000)
 
-            print("✅ test_payment_status_paid: PAID status correct")
+            print("PASS test_payment_status_paid: PAID status correct")
 
     def test_payment_status_overpaid(self):
         """Test OVERPAID status (cash over-tender)."""
@@ -284,7 +364,7 @@ class PaymentSystemTest(unittest.TestCase):
             self.assertEqual(sale.total_paid_cents, 2000)  # Only $20 applied
             self.assertEqual(sale.change_due_cents, 1000)  # $10 change
 
-            print("✅ test_payment_status_overpaid: Overpayment handled correctly")
+            print("PASS test_payment_status_overpaid: Overpayment handled correctly")
 
     # =========================================================================
     # PAYMENT VOID TESTS
@@ -330,7 +410,39 @@ class PaymentSystemTest(unittest.TestCase):
             self.assertEqual(txns[1].transaction_type, "VOID")
             self.assertEqual(txns[1].amount_cents, -2000)  # Negative
 
-            print("✅ test_void_payment: Payment void works correctly")
+            print("PASS test_void_payment: Payment void works correctly")
+
+    def test_void_then_new_payment(self):
+        """Test void then new payment keeps totals consistent."""
+        with self.app.app_context():
+            sale = sales_service.create_sale(self.store_id, self.cashier_id)
+            sales_service.add_line(sale.id, self.product_id, 1)
+
+            payment = payment_service.add_payment(
+                sale_id=sale.id,
+                user_id=self.cashier_id,
+                tender_type=payment_service.TENDER_CASH,
+                amount_cents=2000
+            )
+
+            payment_service.void_payment(
+                payment_id=payment.id,
+                user_id=self.manager_id,
+                reason="Mistake"
+            )
+
+            payment_service.add_payment(
+                sale_id=sale.id,
+                user_id=self.cashier_id,
+                tender_type=payment_service.TENDER_CARD,
+                amount_cents=2000
+            )
+
+            db.session.refresh(sale)
+            self.assertEqual(sale.payment_status, "PAID")
+            self.assertEqual(sale.total_paid_cents, 2000)
+
+            print("Void then new payment ok")
 
     def test_cannot_void_already_voided(self):
         """Test that voided payments cannot be voided again."""
@@ -362,7 +474,7 @@ class PaymentSystemTest(unittest.TestCase):
 
             self.assertIn("already voided", str(context.exception).lower())
 
-            print("✅ test_cannot_void_already_voided: Double void prevented")
+            print("PASS test_cannot_void_already_voided: Double void prevented")
 
     # =========================================================================
     # PAYMENT SUMMARY TESTS
@@ -391,11 +503,69 @@ class PaymentSystemTest(unittest.TestCase):
             self.assertEqual(summary["payment_status"], "PARTIAL")
             self.assertEqual(len(summary["payments"]), 1)
 
-            print("✅ test_payment_summary: Payment summary calculated correctly")
+            print("PASS test_payment_summary: Payment summary calculated correctly")
 
     # =========================================================================
     # TENDER SUMMARY TESTS
     # =========================================================================
+
+    def test_refund_payment(self):
+        """Test refunding a payment using negative transactions."""
+        with self.app.app_context():
+            sale = sales_service.create_sale(self.store_id, self.cashier_id)
+            sales_service.add_line(sale.id, self.product_id, 2)
+
+            payment = payment_service.add_payment(
+                sale_id=sale.id,
+                user_id=self.cashier_id,
+                tender_type=payment_service.TENDER_CASH,
+                amount_cents=4000
+            )
+
+            payment_service.refund_payment(
+                payment_id=payment.id,
+                user_id=self.manager_id,
+                amount_cents=1000,
+                tender_type=payment_service.TENDER_CASH,
+                reason="Refund partial"
+            )
+
+            db.session.refresh(sale)
+            self.assertEqual(sale.total_paid_cents, 3000)
+            self.assertEqual(sale.payment_status, "PARTIAL")
+
+            txns = payment_service.get_payment_transactions(payment.id)
+            self.assertTrue(any(tx.transaction_type == "REFUND" for tx in txns))
+
+            print("Refund payment ok")
+
+    def test_void_sale_reverses_payments(self):
+        """Test voiding a sale reverses payments and inventory."""
+        with self.app.app_context():
+            sale = sales_service.create_sale(self.store_id, self.cashier_id)
+            sales_service.add_line(sale.id, self.product_id, 1)
+
+            payment = payment_service.add_payment(
+                sale_id=sale.id,
+                user_id=self.cashier_id,
+                tender_type=payment_service.TENDER_CASH,
+                amount_cents=2000
+            )
+
+            sales_service.void_sale(
+                sale_id=sale.id,
+                user_id=self.manager_id,
+                reason="Customer cancelled"
+            )
+
+            db.session.refresh(sale)
+            self.assertEqual(sale.status, "VOIDED")
+            self.assertEqual(sale.payment_status, "VOIDED")
+
+            db.session.refresh(payment)
+            self.assertEqual(payment.status, "VOIDED")
+
+            print("Sale void reverses payments ok")
 
     def test_tender_summary(self):
         """Test tender type summary for register session."""
@@ -454,7 +624,7 @@ class PaymentSystemTest(unittest.TestCase):
             self.assertEqual(tender_summary["CASH"], 6000)  # $40 + $20
             self.assertEqual(tender_summary["CARD"], 6000)  # $60
 
-            print("✅ test_tender_summary: Tender summary calculated correctly")
+            print("PASS test_tender_summary: Tender summary calculated correctly")
 
     # =========================================================================
     # VALIDATION TESTS
@@ -476,7 +646,7 @@ class PaymentSystemTest(unittest.TestCase):
 
             self.assertIn("invalid tender type", str(context.exception).lower())
 
-            print("✅ test_invalid_tender_type: Invalid tender type rejected")
+            print("PASS test_invalid_tender_type: Invalid tender type rejected")
 
     def test_negative_payment_amount(self):
         """Test that negative payment amounts are rejected."""
@@ -494,7 +664,7 @@ class PaymentSystemTest(unittest.TestCase):
 
             self.assertIn("must be positive", str(context.exception).lower())
 
-            print("✅ test_negative_payment_amount: Negative amount rejected")
+            print("PASS test_negative_payment_amount: Negative amount rejected")
 
 
 def run_tests():
@@ -521,9 +691,9 @@ def run_tests():
     print(f"Errors: {len(result.errors)}")
 
     if result.wasSuccessful():
-        print("\n✅ ALL TESTS PASSED!")
+        print("\nPASS ALL TESTS PASSED!")
     else:
-        print("\n❌ SOME TESTS FAILED")
+        print("\nFAIL SOME TESTS FAILED")
 
     print("="*80 + "\n")
 

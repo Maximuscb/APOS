@@ -14,6 +14,7 @@ import { LifecycleManager } from "./components/LifecycleManager";
 import { RegistersPanel } from "./components/RegistersPanel";
 import { PaymentsPanel } from "./components/PaymentsPanel";
 import { AuditPanel } from "./components/AuditPanel";
+import { OperationsPanel } from "./components/OperationsPanel";
 
 type Health = any;
 
@@ -39,6 +40,7 @@ const navItems = [
   { id: "sales", label: "Sales" },
   { id: "registers", label: "Registers" },
   { id: "payments", label: "Payments" },
+  { id: "operations", label: "Operations" },
   { id: "audits", label: "Audits" },
   { id: "auth", label: "Authentication" },
 ];
@@ -63,6 +65,10 @@ const pageCopy: Record<string, { title: string; description: string }> = {
   payments: {
     title: "Payments Hub",
     description: "Collect tender, review balances, and handle voids.",
+  },
+  operations: {
+    title: "Operational Documents",
+    description: "Manage returns, transfers, and counts with audit-grade controls.",
   },
   audits: {
     title: "Audit Logs",
@@ -574,6 +580,12 @@ export default function App() {
         {activePage === "payments" && (
           <section className="content-grid fade-in delay-2">
             <PaymentsPanel authVersion={authVersion} isAuthed={authStatus === "authenticated"} />
+          </section>
+        )}
+
+        {activePage === "operations" && (
+          <section className="content-grid fade-in delay-2">
+            <OperationsPanel storeId={storeId} isAuthed={authStatus === "authenticated"} />
           </section>
         )}
 

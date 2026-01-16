@@ -18,7 +18,7 @@ SECURITY:
 - All operations logged to payment_transactions ledger
 """
 
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 from sqlalchemy import desc
 
 from ..models import Payment, PaymentTransaction, Sale
@@ -101,8 +101,9 @@ def add_payment_route():
 
     except PaymentError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to add payment")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # =============================================================================
@@ -151,8 +152,9 @@ def get_sale_payments_route(sale_id: int):
 
     except PaymentError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to load sale payments")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @payments_bp.get("/<int:payment_id>")
@@ -204,8 +206,9 @@ def get_payment_summary_route(sale_id: int):
 
     except PaymentError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to load payment summary")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # =============================================================================
@@ -258,8 +261,54 @@ def void_payment_route(payment_id: int):
 
     except PaymentError as e:
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to void payment")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@payments_bp.post("/<int:payment_id>/refund")
+@require_auth
+@require_permission("REFUND_PAYMENT")
+def refund_payment_route(payment_id: int):
+    """
+    Refund a payment (negative payment transaction).
+
+    Requires: REFUND_PAYMENT permission
+    Available to: admin, manager
+    """
+    try:
+        data = request.get_json()
+        reason = data.get("reason")
+        amount_cents = data.get("amount_cents")
+        tender_type = data.get("tender_type")
+        register_id = data.get("register_id")
+        register_session_id = data.get("register_session_id")
+
+        if not all([reason, amount_cents, tender_type]):
+            return jsonify({"error": "reason, amount_cents, and tender_type required"}), 400
+
+        txn = payment_service.refund_payment(
+            payment_id=payment_id,
+            user_id=g.current_user.id,
+            amount_cents=amount_cents,
+            tender_type=tender_type,
+            reason=reason,
+            register_id=register_id,
+            register_session_id=register_session_id,
+        )
+
+        summary = payment_service.get_payment_summary(txn.sale_id)
+
+        return jsonify({
+            "transaction": txn.to_dict(),
+            "summary": summary
+        }), 201
+
+    except PaymentError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        current_app.logger.exception("Failed to refund payment")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # =============================================================================
@@ -294,8 +343,9 @@ def get_tender_summary_route(session_id: int):
             "tender_totals_cents": tender_totals
         }), 200
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        current_app.logger.exception("Failed to get tender summary")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 # =============================================================================
@@ -367,4 +417,5 @@ def list_payment_transactions_route():
                 "transactions": [],
                 "warning": "payment_transactions ledger table is missing; run migrations to enable audit trail"
             }), 200
-        return jsonify({"error": "Database error", "detail": str(e)}), 500
+        current_app.logger.exception("Payment transaction list failed")
+        return jsonify({"error": "Database error"}), 500

@@ -32,7 +32,7 @@ def validate_password_strength(password: str) -> None:
     - At least one uppercase letter
     - At least one lowercase letter
     - At least one digit
-    - At least one special character (!@#$%^&*(),.?":{}|<>)
+    - At least one special character (!@#$%^&*(),.'":{}|<>)
 
     Raises PasswordValidationError if requirements not met.
     """
@@ -48,7 +48,7 @@ def validate_password_strength(password: str) -> None:
     if not re.search(r'\d', password):
         raise PasswordValidationError("Password must contain at least one digit")
 
-    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+    if not re.search(r"[!@#$%^&*(),.'\":{}|<>]", password):
         raise PasswordValidationError("Password must contain at least one special character")
 
 

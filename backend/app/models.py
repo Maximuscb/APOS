@@ -150,7 +150,7 @@ class InventoryTransaction(db.Model):
 
     note = db.Column(db.String(255), nullable=True)
 
-    # “As-of” timestamp for historical queries
+    # "As-of" timestamp for historical queries
     occurred_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -174,17 +174,17 @@ class InventoryTransaction(db.Model):
     cogs_cents = db.Column(db.Integer, nullable=True)
 
     # ==================================================================================
-    # Phase 5: Document Lifecycle (Draft → Approved → Posted)
+    # Phase 5: Document Lifecycle (Draft -> Approved -> Posted)
     # ==================================================================================
     # WHY: Prevents accidental posting, enables review workflows, and allows
     # AI-generated drafts later without risk. Only POSTED transactions affect
     # inventory calculations (on-hand qty, WAC, COGS).
     #
     # State transition rules (see lifecycle_service.py):
-    # - DRAFT → APPROVED (requires approval authority)
-    # - APPROVED → POSTED (finalizes; irreversible; affects ledger)
-    # - Cannot skip states (DRAFT → POSTED is forbidden)
-    # - Cannot reverse transitions (POSTED → APPROVED is forbidden)
+    # - DRAFT -> APPROVED (requires approval authority)
+    # - APPROVED -> POSTED (finalizes; irreversible; affects ledger)
+    # - Cannot skip states (DRAFT -> POSTED is forbidden)
+    # - Cannot reverse transitions (POSTED -> APPROVED is forbidden)
     #
     # Default: POSTED (for backwards compatibility with existing transactions)
     # New transactions default to DRAFT unless explicitly posted.
@@ -361,6 +361,11 @@ class Sale(db.Model):
     # User attribution (nullable until Phase 4 complete)
     created_by_user_id = db.Column(db.Integer, nullable=True)
 
+    # Void audit trail
+    voided_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    voided_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    void_reason = db.Column(db.String(255), nullable=True)
+
     # Phase 8: Register tracking
     register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=True, index=True)
     register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
@@ -384,6 +389,9 @@ class Sale(db.Model):
             "created_at": to_utc_z(self.created_at),
             "completed_at": to_utc_z(self.completed_at) if self.completed_at else None,
             "created_by_user_id": self.created_by_user_id,
+            "voided_by_user_id": self.voided_by_user_id,
+            "voided_at": to_utc_z(self.voided_at) if self.voided_at else None,
+            "void_reason": self.void_reason,
             "register_id": self.register_id,
             "register_session_id": self.register_session_id,
             "payment_status": self.payment_status,
@@ -502,6 +510,7 @@ class RegisterSession(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=False, index=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    opened_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
 
     # Session status
     status = db.Column(db.String(16), nullable=False, default="OPEN", index=True)  # OPEN, CLOSED
@@ -523,7 +532,8 @@ class RegisterSession(db.Model):
     version_id = db.Column(db.Integer, nullable=False, default=1)
 
     register = db.relationship("Register", backref=db.backref("sessions", lazy=True))
-    user = db.relationship("User", backref=db.backref("register_sessions", lazy=True))
+    user = db.relationship("User", foreign_keys=[user_id], backref=db.backref("register_sessions", lazy=True))
+    opened_by = db.relationship("User", foreign_keys=[opened_by_user_id], backref=db.backref("register_sessions_opened", lazy=True))
     __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
@@ -531,6 +541,7 @@ class RegisterSession(db.Model):
             "id": self.id,
             "register_id": self.register_id,
             "user_id": self.user_id,
+            "opened_by_user_id": self.opened_by_user_id,
             "status": self.status,
             "opening_cash_cents": self.opening_cash_cents,
             "closing_cash_cents": self.closing_cash_cents,
@@ -1016,6 +1027,9 @@ class TransferLine(db.Model):
     # Quantity being transferred
     quantity = db.Column(db.Integer, nullable=False)
 
+    # Cost snapshot captured at ship time (from source store WAC)
+    unit_cost_cents = db.Column(db.Integer, nullable=True)
+
     # Links to inventory transactions (created when shipped and received)
     # out_transaction_id: negative TRANSFER at source store (inventory_state=IN_TRANSIT)
     # in_transaction_id: positive TRANSFER at destination store (inventory_state=SELLABLE)
@@ -1037,6 +1051,7 @@ class TransferLine(db.Model):
             "transfer_id": self.transfer_id,
             "product_id": self.product_id,
             "quantity": self.quantity,
+            "unit_cost_cents": self.unit_cost_cents,
             "out_transaction_id": self.out_transaction_id,
             "in_transaction_id": self.in_transaction_id,
             "version_id": self.version_id,
@@ -1136,7 +1151,10 @@ class CountLine(db.Model):
     Variance (actual - expected) is posted as ADJUST transaction.
     """
     __tablename__ = "count_lines"
-    __table_args__ = {"sqlite_autoincrement": True}
+    __table_args__ = (
+        db.UniqueConstraint("count_id", "product_id", name="uq_count_lines_count_product"),
+        {"sqlite_autoincrement": True},
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     count_id = db.Column(db.Integer, db.ForeignKey("counts.id"), nullable=False, index=True)
@@ -1438,7 +1456,10 @@ class SessionToken(db.Model):
 
 class MasterLedgerEvent(db.Model):
     __tablename__ = "master_ledger_events"
-    __table_args__ = {"sqlite_autoincrement": True}
+    __table_args__ = (
+        db.Index("ix_master_ledger_store_occurred", "store_id", "occurred_at"),
+        {"sqlite_autoincrement": True},
+    )
 
     id = db.Column(db.Integer, primary_key=True)
 
@@ -1446,10 +1467,22 @@ class MasterLedgerEvent(db.Model):
 
     # What happened
     event_type = db.Column(db.String(64), nullable=False, index=True)  # e.g., PRODUCT_CREATED, PRODUCT_DELETED, INV_TX_CREATED
+    event_category = db.Column(db.String(32), nullable=False, index=True)  # inventory, product, payment, register, cash_drawer, sales, returns, transfers, counts
 
     # What it refers to (generic pointer)
     entity_type = db.Column(db.String(64), nullable=False, index=True)  # e.g., product, inventory_transaction
     entity_id = db.Column(db.Integer, nullable=False, index=True)
+
+    # Actor and cross-module references
+    actor_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
+    register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=True, index=True)
+    register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
+    sale_id = db.Column(db.Integer, db.ForeignKey("sales.id"), nullable=True, index=True)
+    payment_id = db.Column(db.Integer, db.ForeignKey("payments.id"), nullable=True, index=True)
+    return_id = db.Column(db.Integer, db.ForeignKey("returns.id"), nullable=True, index=True)
+    transfer_id = db.Column(db.Integer, db.ForeignKey("transfers.id"), nullable=True, index=True)
+    count_id = db.Column(db.Integer, db.ForeignKey("counts.id"), nullable=True, index=True)
+    cash_drawer_event_id = db.Column(db.Integer, db.ForeignKey("cash_drawer_events.id"), nullable=True, index=True)
 
     # Business vs system time (same timestamp policy as inventory)
     occurred_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), index=True)
@@ -1457,15 +1490,58 @@ class MasterLedgerEvent(db.Model):
 
     # Optional structured metadata (keep small; do not denormalize domain state)
     note = db.Column(db.String(255), nullable=True)
+    payload = db.Column(db.Text, nullable=True)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "store_id": self.store_id,
             "event_type": self.event_type,
+            "event_category": self.event_category,
             "entity_type": self.entity_type,
             "entity_id": self.entity_id,
+            "actor_user_id": self.actor_user_id,
+            "register_id": self.register_id,
+            "register_session_id": self.register_session_id,
+            "sale_id": self.sale_id,
+            "payment_id": self.payment_id,
+            "return_id": self.return_id,
+            "transfer_id": self.transfer_id,
+            "count_id": self.count_id,
+            "cash_drawer_event_id": self.cash_drawer_event_id,
             "occurred_at": to_utc_z(self.occurred_at),
             "created_at": to_utc_z(self.created_at),
             "note": self.note,
+            "payload": self.payload,
+        }
+
+
+class DocumentSequence(db.Model):
+    """
+    Phase 15: Atomic per-store document sequences.
+
+    WHY: Prevent race conditions when generating document numbers
+    (sales, returns, transfers, counts).
+    """
+    __tablename__ = "document_sequences"
+    __table_args__ = (
+        db.UniqueConstraint("store_id", "document_type", name="uq_doc_sequences_store_type"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
+    document_type = db.Column(db.String(32), nullable=False, index=True)
+    next_number = db.Column(db.Integer, nullable=False, default=1)
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
+
+    store = db.relationship("Store", backref=db.backref("document_sequences", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "store_id": self.store_id,
+            "document_type": self.document_type,
+            "next_number": self.next_number,
+            "updated_at": to_utc_z(self.updated_at),
         }

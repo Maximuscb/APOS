@@ -1,4 +1,5 @@
 # backend/app/__init__.py
+import os
 from flask import Flask, request
 
 from .config import Config
@@ -9,6 +10,9 @@ from .extensions import db, migrate
 def create_app() -> Flask:
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_object(Config)
+    env_db = os.environ.get("DATABASE_URL")
+    if env_db:
+        app.config["SQLALCHEMY_DATABASE_URI"] = env_db
 
     # Initialize extensions
     db.init_app(app)

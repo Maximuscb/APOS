@@ -7,8 +7,8 @@ The document lifecycle is a CRITICAL architectural feature that prevents acciden
 posting and enables review workflows. These tests verify that:
 
 1. ONLY POSTED transactions affect inventory calculations (on-hand qty, WAC)
-2. State transitions follow the rules (DRAFT → APPROVED → POSTED)
-3. Invalid transitions are blocked (DRAFT → POSTED, POSTED → anything)
+2. State transitions follow the rules (DRAFT -> APPROVED -> POSTED)
+3. Invalid transitions are blocked (DRAFT -> POSTED, POSTED -> anything)
 4. Master ledger events are created ONLY on posting
 5. DRAFT transactions can be created without affecting inventory
 6. Inventory calculations ignore DRAFT and APPROVED transactions
@@ -99,12 +99,12 @@ def main() -> int:
         ).count()
         print(f"Master ledger events for DRAFT tx: {ledger_count}")
         assert ledger_count == 0, "DRAFT transactions must NOT create master ledger events"
-        print("✓ DRAFT transaction correctly ignored in calculations")
+        print("PASS DRAFT transaction correctly ignored in calculations")
 
         # ========================================================================
-        # TEST 2: State transition DRAFT → APPROVED
+        # TEST 2: State transition DRAFT -> APPROVED
         # ========================================================================
-        _print("TEST 2: State transition DRAFT → APPROVED")
+        _print("TEST 2: State transition DRAFT -> APPROVED")
 
         approved_tx = approve_transaction(draft_rx.id)
         print(f"Approved tx id={approved_tx.id}, status={approved_tx.status}")
@@ -115,12 +115,12 @@ def main() -> int:
         qty = get_quantity_on_hand(store_id, product_id)
         print(f"Quantity on hand after APPROVED: {qty}")
         assert qty == 0, "APPROVED transactions must NOT affect quantity on hand"
-        print("✓ State transition DRAFT → APPROVED successful")
+        print("PASS State transition DRAFT -> APPROVED successful")
 
         # ========================================================================
-        # TEST 3: State transition APPROVED → POSTED
+        # TEST 3: State transition APPROVED -> POSTED
         # ========================================================================
-        _print("TEST 3: State transition APPROVED → POSTED")
+        _print("TEST 3: State transition APPROVED -> POSTED")
 
         posted_tx = post_transaction(approved_tx.id)
         print(f"Posted tx id={posted_tx.id}, status={posted_tx.status}")
@@ -140,12 +140,12 @@ def main() -> int:
         print(f"Master ledger events for POSTED tx: {ledger_count}")
         # Note: The event was created by post_transaction, NOT by receive_inventory
         # This is current behavior; in future, post_transaction should create the event
-        print("✓ State transition APPROVED → POSTED successful")
+        print("PASS State transition APPROVED -> POSTED successful")
 
         # ========================================================================
-        # TEST 4: Invalid transition DRAFT → POSTED (must go through APPROVED)
+        # TEST 4: Invalid transition DRAFT -> POSTED (must go through APPROVED)
         # ========================================================================
-        _print("TEST 4: Invalid transition DRAFT → POSTED (must go through APPROVED)")
+        _print("TEST 4: Invalid transition DRAFT -> POSTED (must go through APPROVED)")
 
         draft_rx2 = receive_inventory(
             store_id=store_id,
@@ -161,12 +161,12 @@ def main() -> int:
             post_transaction(draft_rx2.id)
             raise AssertionError("Expected LifecycleError when posting DRAFT directly")
         except LifecycleError as e:
-            print(f"✓ Correctly blocked DRAFT → POSTED: {e}")
+            print(f"PASS Correctly blocked DRAFT -> POSTED: {e}")
 
         # ========================================================================
-        # TEST 5: Invalid reverse transition POSTED → APPROVED
+        # TEST 5: Invalid reverse transition POSTED -> APPROVED
         # ========================================================================
-        _print("TEST 5: Invalid reverse transition POSTED → APPROVED")
+        _print("TEST 5: Invalid reverse transition POSTED -> APPROVED")
 
         # Verify transaction is actually POSTED
         posted_tx_reloaded = db.session.query(InventoryTransaction).filter_by(id=posted_tx.id).one()
@@ -178,7 +178,7 @@ def main() -> int:
             approve_transaction(posted_tx.id)
             raise AssertionError("Expected LifecycleError when approving POSTED tx")
         except LifecycleError as e:
-            print(f"✓ Correctly blocked POSTED → APPROVED: {e}")
+            print(f"PASS Correctly blocked POSTED -> APPROVED: {e}")
 
         # ========================================================================
         # TEST 6: Multiple DRAFT transactions don't affect inventory
@@ -198,7 +198,7 @@ def main() -> int:
         qty = get_quantity_on_hand(store_id, product_id)
         print(f"Quantity on hand with 3 DRAFT adjustments: {qty}")
         assert qty == 100, "DRAFT adjustments must NOT affect quantity (should still be 100)"
-        print("✓ Multiple DRAFT transactions correctly ignored")
+        print("PASS Multiple DRAFT transactions correctly ignored")
 
         # ========================================================================
         # TEST 7: Approve and post one DRAFT adjustment
@@ -226,7 +226,7 @@ def main() -> int:
         expected_qty = 100 + posted_adj.quantity_delta
         print(f"Quantity after POSTED: {qty_after_post} (expected {expected_qty})")
         assert qty_after_post == expected_qty, "POSTED adjustment must affect inventory"
-        print("✓ Lifecycle works correctly for adjustments")
+        print("PASS Lifecycle works correctly for adjustments")
 
         # ========================================================================
         # TEST 8: Weighted Average Cost only includes POSTED receives
@@ -262,7 +262,7 @@ def main() -> int:
         print(f"WAC after POSTED receive: {summary3['weighted_average_cost_cents']} cents")
         expected_wac = 750
         assert summary3['weighted_average_cost_cents'] == expected_wac, f"Expected WAC={expected_wac}"
-        print("✓ WAC correctly ignores DRAFT/APPROVED receives, includes only POSTED")
+        print("PASS WAC correctly ignores DRAFT/APPROVED receives, includes only POSTED")
 
         # ========================================================================
         # TEST 9: Can't approve or post non-existent transaction
@@ -273,26 +273,26 @@ def main() -> int:
             approve_transaction(999999)
             raise AssertionError("Expected ValueError for non-existent transaction")
         except ValueError as e:
-            print(f"✓ Correctly rejected non-existent tx for approval: {e}")
+            print(f"PASS Correctly rejected non-existent tx for approval: {e}")
 
         try:
             post_transaction(999999)
             raise AssertionError("Expected ValueError for non-existent transaction")
         except ValueError as e:
-            print(f"✓ Correctly rejected non-existent tx for posting: {e}")
+            print(f"PASS Correctly rejected non-existent tx for posting: {e}")
 
         # ========================================================================
         # ALL TESTS PASSED
         # ========================================================================
-        _print("ALL LIFECYCLE TESTS PASSED ✓")
+        _print("ALL LIFECYCLE TESTS PASSED PASS")
         print("\nLifecycle system is working correctly:")
-        print("  ✓ DRAFT transactions don't affect inventory")
-        print("  ✓ APPROVED transactions don't affect inventory")
-        print("  ✓ POSTED transactions affect inventory calculations")
-        print("  ✓ State transitions enforce DRAFT → APPROVED → POSTED")
-        print("  ✓ Invalid transitions are blocked")
-        print("  ✓ WAC calculations respect lifecycle status")
-        print("  ✓ Master ledger events created only for POSTED")
+        print("  PASS DRAFT transactions don't affect inventory")
+        print("  PASS APPROVED transactions don't affect inventory")
+        print("  PASS POSTED transactions affect inventory calculations")
+        print("  PASS State transitions enforce DRAFT -> APPROVED -> POSTED")
+        print("  PASS Invalid transitions are blocked")
+        print("  PASS WAC calculations respect lifecycle status")
+        print("  PASS Master ledger events created only for POSTED")
         return 0
 
 

@@ -6,7 +6,9 @@ from flask import Blueprint, request, jsonify, g
 from ..models import Sale, SaleLine
 from ..extensions import db
 from ..services import sales_service
+from ..services.sales_service import SaleError
 from ..decorators import require_auth, require_permission
+from flask import current_app
 
 
 sales_bp = Blueprint("sales", __name__, url_prefix="/api/sales")
@@ -35,7 +37,8 @@ def create_sale_route():
         return jsonify({"sale": sale.to_dict()}), 201
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        current_app.logger.exception("Failed to create sale")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @sales_bp.post("/<int:sale_id>/lines")
@@ -60,10 +63,11 @@ def add_line_route(sale_id: int):
 
         return jsonify({"line": line.to_dict()}), 201
 
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    except SaleError as e:
+        return jsonify({"error": str(e), "details": e.details}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        current_app.logger.exception("Failed to add sale line")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @sales_bp.post("/<int:sale_id>/post")
@@ -77,13 +81,14 @@ def post_sale_route(sale_id: int):
     Available to: admin, manager, cashier
     """
     try:
-        sale = sales_service.post_sale(sale_id)
+        sale = sales_service.post_sale(sale_id, g.current_user.id)
         return jsonify({"sale": sale.to_dict()}), 200
 
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    except SaleError as e:
+        return jsonify({"error": str(e), "details": e.details}), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        current_app.logger.exception("Failed to post sale")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @sales_bp.get("/<int:sale_id>")
@@ -106,3 +111,39 @@ def get_sale_route(sale_id: int):
         "sale": sale.to_dict(),
         "lines": [line.to_dict() for line in lines]
     }), 200
+
+
+@sales_bp.post("/<int:sale_id>/void")
+@require_auth
+@require_permission("VOID_SALE")
+def void_sale_route(sale_id: int):
+    """
+    Void a posted sale and reverse its financial effects.
+
+    Requires: VOID_SALE permission
+    Available to: admin, manager
+    """
+    try:
+        data = request.get_json()
+        reason = data.get("reason")
+        register_id = data.get("register_id")
+        register_session_id = data.get("register_session_id")
+
+        if not reason:
+            return jsonify({"error": "reason required"}), 400
+
+        sale = sales_service.void_sale(
+            sale_id=sale_id,
+            user_id=g.current_user.id,
+            reason=reason,
+            register_id=register_id,
+            register_session_id=register_session_id,
+        )
+
+        return jsonify({"sale": sale.to_dict()}), 200
+
+    except SaleError as e:
+        return jsonify({"error": str(e), "details": e.details}), 400
+    except Exception:
+        current_app.logger.exception("Failed to void sale")
+        return jsonify({"error": "Internal server error"}), 500

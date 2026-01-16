@@ -2,7 +2,7 @@
 """
 Phase 11: Physical inventory count API routes.
 """
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, g, current_app
 from app.extensions import db
 from app.decorators import require_auth, require_permission
 from app.services import count_service
@@ -52,9 +52,10 @@ def create_count():
     except count_service.CountError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to create count")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @counts_bp.route("/<int:count_id>/lines", methods=["POST"])
@@ -96,9 +97,10 @@ def add_count_line(count_id: int):
     except count_service.CountError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to add count line")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @counts_bp.route("/<int:count_id>/approve", methods=["POST"])
@@ -128,9 +130,10 @@ def approve_count(count_id: int):
     except count_service.CountError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to approve count")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @counts_bp.route("/<int:count_id>/post", methods=["POST"])
@@ -159,9 +162,10 @@ def post_count(count_id: int):
     except count_service.CountError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to post count")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @counts_bp.route("/<int:count_id>/cancel", methods=["POST"])
@@ -202,9 +206,10 @@ def cancel_count(count_id: int):
     except count_service.CountError as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+        current_app.logger.exception("Failed to cancel count")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @counts_bp.route("/<int:count_id>", methods=["GET"])
@@ -224,8 +229,9 @@ def get_count(count_id: int):
 
     except count_service.CountError as e:
         return jsonify({"error": str(e)}), 404
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to get count summary")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @counts_bp.route("/pending", methods=["GET"])
@@ -245,8 +251,9 @@ def list_pending_counts():
 
         return jsonify([c.to_dict() for c in counts]), 200
 
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to list pending counts")
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @counts_bp.route("", methods=["GET"])
@@ -286,5 +293,6 @@ def list_counts():
 
         return jsonify([c.to_dict() for c in counts]), 200
 
-    except Exception as e:
-        return jsonify({"error": f"Unexpected error: {e}"}), 500
+    except Exception:
+        current_app.logger.exception("Failed to list counts")
+        return jsonify({"error": "Internal server error"}), 500

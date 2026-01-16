@@ -71,7 +71,8 @@ def create_product(*, patch: dict) -> dict:
 
     append_ledger_event(
         store_id=p.store_id,
-        event_type="PRODUCT_CREATED",
+        event_type="product.created",
+        event_category="product",
         entity_type="product",
         entity_id=p.id,
         occurred_at=utcnow(),
@@ -107,7 +108,8 @@ def delete_product(*, product_id: int) -> bool:
 
         append_ledger_event(
             store_id=p.store_id,
-            event_type="PRODUCT_DEACTIVATED",
+            event_type="product.deactivated",
+            event_category="product",
             entity_type="product",
             entity_id=p.id,
             occurred_at=utcnow(),
@@ -140,7 +142,8 @@ def update_product(*, product_id: int, patch: dict) -> dict | None:
     apply_product_patch(p, patch)
     append_ledger_event(
         store_id=p.store_id,
-        event_type="PRODUCT_UPDATED",
+        event_type="product.updated",
+        event_category="product",
         entity_type="product",
         entity_id=p.id,
         occurred_at=utcnow(),

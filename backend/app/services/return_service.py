@@ -16,7 +16,7 @@ DESIGN PRINCIPLES:
 LIFECYCLE:
 1. Create return (PENDING) - Customer initiates return
 2. Approve/Reject (manager decision)
-3. Complete return (APPROVED → COMPLETED) - Process return, restore inventory, issue refund
+3. Complete return (APPROVED -> COMPLETED) - Process return, restore inventory, issue refund
 """
 
 from ..extensions import db
@@ -24,6 +24,8 @@ from ..models import Return, ReturnLine, Sale, SaleLine, InventoryTransaction
 from app.time_utils import utcnow
 from sqlalchemy import and_
 from .concurrency import lock_for_update, run_with_retry
+from .document_service import next_document_number
+from .ledger_service import append_ledger_event
 
 
 class ReturnError(Exception):
@@ -84,10 +86,11 @@ def create_return(
         if sale.status != "POSTED":
             raise ReturnError(f"Can only return POSTED sales. Sale {original_sale_id} has status: {sale.status}")
 
-        # Generate document number
-        # Count existing returns for store to get next number
-        count = db.session.query(Return).filter_by(store_id=store_id).count()
-        document_number = f"R-{str(count + 1).zfill(6)}"
+        document_number = next_document_number(
+            store_id=store_id,
+            document_type="RETURN",
+            prefix="R",
+        )
 
         # Create return
         return_doc = Return(
@@ -105,6 +108,21 @@ def create_return(
 
         db.session.add(return_doc)
         db.session.commit()
+
+        append_ledger_event(
+            store_id=store_id,
+            event_type="return.created",
+            event_category="returns",
+            entity_type="return",
+            entity_id=return_doc.id,
+            actor_user_id=user_id,
+            register_id=register_id,
+            register_session_id=register_session_id,
+            sale_id=original_sale_id,
+            return_id=return_doc.id,
+            occurred_at=return_doc.created_at,
+            note=reason,
+        )
 
         return return_doc
 
@@ -255,6 +273,18 @@ def approve_return(
 
         db.session.commit()
 
+        append_ledger_event(
+            store_id=return_doc.store_id,
+            event_type="return.approved",
+            event_category="returns",
+            entity_type="return",
+            entity_id=return_doc.id,
+            actor_user_id=manager_user_id,
+            return_id=return_doc.id,
+            sale_id=return_doc.original_sale_id,
+            occurred_at=return_doc.approved_at,
+        )
+
         return return_doc
 
     return run_with_retry(_op)
@@ -300,6 +330,19 @@ def reject_return(
         return_doc.rejection_reason = rejection_reason
 
         db.session.commit()
+
+        append_ledger_event(
+            store_id=return_doc.store_id,
+            event_type="return.rejected",
+            event_category="returns",
+            entity_type="return",
+            entity_id=return_doc.id,
+            actor_user_id=manager_user_id,
+            return_id=return_doc.id,
+            sale_id=return_doc.original_sale_id,
+            occurred_at=return_doc.rejected_at,
+            note=rejection_reason,
+        )
 
         return return_doc
 
@@ -375,12 +418,38 @@ def complete_return(
             # Link return line to inventory transaction
             return_line.inventory_transaction_id = inv_txn.id
 
+            append_ledger_event(
+                store_id=return_doc.store_id,
+                event_type="inventory.return_posted",
+                event_category="inventory",
+                entity_type="inventory_transaction",
+                entity_id=inv_txn.id,
+                actor_user_id=user_id,
+                return_id=return_doc.id,
+                sale_id=return_doc.original_sale_id,
+                occurred_at=inv_txn.occurred_at,
+                note=inv_txn.note,
+                payload=f"product_id={return_line.product_id},quantity={return_line.quantity}",
+            )
+
         # Mark return as completed
         return_doc.status = RETURN_STATUS_COMPLETED
         return_doc.completed_at = utcnow()
         return_doc.completed_by_user_id = user_id
 
         db.session.commit()
+
+        append_ledger_event(
+            store_id=return_doc.store_id,
+            event_type="return.completed",
+            event_category="returns",
+            entity_type="return",
+            entity_id=return_doc.id,
+            actor_user_id=user_id,
+            return_id=return_doc.id,
+            sale_id=return_doc.original_sale_id,
+            occurred_at=return_doc.completed_at,
+        )
 
         return return_doc
 

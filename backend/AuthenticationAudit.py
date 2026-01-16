@@ -51,49 +51,49 @@ def test_password_validation():
         # Test: Password too short
         try:
             auth_service.validate_password_strength("Pass1!")
-            print("❌ FAIL: Short password should be rejected")
+            print("FAIL FAIL: Short password should be rejected")
             return False
         except PasswordValidationError as e:
-            print(f"✅ PASS: Short password rejected - {e}")
+            print(f"PASS PASS: Short password rejected - {e}")
 
         # Test: No uppercase
         try:
             auth_service.validate_password_strength("password123!")
-            print("❌ FAIL: No uppercase should be rejected")
+            print("FAIL FAIL: No uppercase should be rejected")
             return False
         except PasswordValidationError:
-            print("✅ PASS: No uppercase rejected")
+            print("PASS PASS: No uppercase rejected")
 
         # Test: No lowercase
         try:
             auth_service.validate_password_strength("PASSWORD123!")
-            print("❌ FAIL: No lowercase should be rejected")
+            print("FAIL FAIL: No lowercase should be rejected")
             return False
         except PasswordValidationError:
-            print("✅ PASS: No lowercase rejected")
+            print("PASS PASS: No lowercase rejected")
 
         # Test: No digit
         try:
             auth_service.validate_password_strength("Password!")
-            print("❌ FAIL: No digit should be rejected")
+            print("FAIL FAIL: No digit should be rejected")
             return False
         except PasswordValidationError:
-            print("✅ PASS: No digit rejected")
+            print("PASS PASS: No digit rejected")
 
         # Test: No special character
         try:
             auth_service.validate_password_strength("Password123")
-            print("❌ FAIL: No special char should be rejected")
+            print("FAIL FAIL: No special char should be rejected")
             return False
         except PasswordValidationError:
-            print("✅ PASS: No special char rejected")
+            print("PASS PASS: No special char rejected")
 
         # Test: Valid password
         try:
             auth_service.validate_password_strength("Password123!")
-            print("✅ PASS: Valid password accepted")
+            print("PASS PASS: Valid password accepted")
         except PasswordValidationError as e:
-            print(f"❌ FAIL: Valid password rejected - {e}")
+            print(f"FAIL FAIL: Valid password rejected - {e}")
             return False
 
     return True
@@ -109,33 +109,33 @@ def test_bcrypt_hashing():
 
         # Test: Hash generation
         hash1 = auth_service.hash_password(password)
-        print(f"✅ PASS: Generated bcrypt hash: {hash1[:20]}...")
+        print(f"PASS PASS: Generated bcrypt hash: {hash1[:20]}...")
 
         # Test: Hash is different each time (salt randomization)
         hash2 = auth_service.hash_password(password)
         if hash1 == hash2:
-            print("❌ FAIL: Same password produced identical hash (salt not working)")
+            print("FAIL FAIL: Same password produced identical hash (salt not working)")
             return False
-        print("✅ PASS: Same password produces different hashes (salt working)")
+        print("PASS PASS: Same password produces different hashes (salt working)")
 
         # Test: Verification works
         if not auth_service.verify_password(password, hash1):
-            print("❌ FAIL: Password verification failed for correct password")
+            print("FAIL FAIL: Password verification failed for correct password")
             return False
-        print("✅ PASS: Correct password verifies successfully")
+        print("PASS PASS: Correct password verifies successfully")
 
         # Test: Wrong password fails
         if auth_service.verify_password("WrongPassword123!", hash1):
-            print("❌ FAIL: Wrong password verified (security breach!)")
+            print("FAIL FAIL: Wrong password verified (security breach!)")
             return False
-        print("✅ PASS: Wrong password rejected")
+        print("PASS PASS: Wrong password rejected")
 
         # Test: Legacy stub hash still works (backwards compatibility)
         stub_hash = "STUB_HASH_password123"
         if not auth_service.verify_password("password123", stub_hash):
-            print("❌ FAIL: Legacy stub hash verification broken")
+            print("FAIL FAIL: Legacy stub hash verification broken")
             return False
-        print("✅ PASS: Legacy stub hash still works (backwards compatible)")
+        print("PASS PASS: Legacy stub hash still works (backwards compatible)")
 
     return True
 
@@ -157,23 +157,23 @@ def test_user_creation_with_bcrypt():
         )
 
         if not user.password_hash.startswith("$2b$"):
-            print(f"❌ FAIL: Password hash doesn't start with bcrypt prefix: {user.password_hash[:10]}")
+            print(f"FAIL FAIL: Password hash doesn't start with bcrypt prefix: {user.password_hash[:10]}")
             return False
-        print(f"✅ PASS: User created with bcrypt hash: {user.password_hash[:30]}...")
+        print(f"PASS PASS: User created with bcrypt hash: {user.password_hash[:30]}...")
 
         # Test: Can authenticate with correct password
         auth_user = auth_service.authenticate("testuser", "SecurePass123!")
         if not auth_user:
-            print("❌ FAIL: Authentication failed with correct password")
+            print("FAIL FAIL: Authentication failed with correct password")
             return False
-        print("✅ PASS: Authentication successful with correct password")
+        print("PASS PASS: Authentication successful with correct password")
 
         # Test: Cannot authenticate with wrong password
         auth_user = auth_service.authenticate("testuser", "WrongPassword123!")
         if auth_user:
-            print("❌ FAIL: Authentication succeeded with wrong password")
+            print("FAIL FAIL: Authentication succeeded with wrong password")
             return False
-        print("✅ PASS: Authentication failed with wrong password")
+        print("PASS PASS: Authentication failed with wrong password")
 
         # Test: Weak password rejected
         try:
@@ -183,10 +183,10 @@ def test_user_creation_with_bcrypt():
                 password="weak",
                 store_id=store_id
             )
-            print("❌ FAIL: Weak password was accepted")
+            print("FAIL FAIL: Weak password was accepted")
             return False
         except PasswordValidationError:
-            print("✅ PASS: Weak password rejected on user creation")
+            print("PASS PASS: Weak password rejected on user creation")
 
     return True
 
@@ -200,30 +200,30 @@ def test_session_token_generation():
         # Test: Token generation
         token = session_service.generate_token()
         if len(token) != 64:  # 32 bytes * 2 (hex encoding)
-            print(f"❌ FAIL: Token wrong length: {len(token)} (expected 64)")
+            print(f"FAIL FAIL: Token wrong length: {len(token)} (expected 64)")
             return False
-        print(f"✅ PASS: Generated 64-char token: {token[:20]}...")
+        print(f"PASS PASS: Generated 64-char token: {token[:20]}...")
 
         # Test: Tokens are unique
         token2 = session_service.generate_token()
         if token == token2:
-            print("❌ FAIL: Generated identical tokens (not random!)")
+            print("FAIL FAIL: Generated identical tokens (not random!)")
             return False
-        print("✅ PASS: Tokens are unique")
+        print("PASS PASS: Tokens are unique")
 
         # Test: Token hashing
         token_hash = session_service.hash_token(token)
         if len(token_hash) != 64:  # SHA-256 hex is 64 chars
-            print(f"❌ FAIL: Token hash wrong length: {len(token_hash)}")
+            print(f"FAIL FAIL: Token hash wrong length: {len(token_hash)}")
             return False
-        print(f"✅ PASS: Token hashed to SHA-256: {token_hash[:20]}...")
+        print(f"PASS PASS: Token hashed to SHA-256: {token_hash[:20]}...")
 
         # Test: Same token produces same hash (deterministic)
         token_hash2 = session_service.hash_token(token)
         if token_hash != token_hash2:
-            print("❌ FAIL: Same token produced different hashes")
+            print("FAIL FAIL: Same token produced different hashes")
             return False
-        print("✅ PASS: Token hashing is deterministic")
+        print("PASS PASS: Token hashing is deterministic")
 
     return True
 
@@ -250,37 +250,37 @@ def test_session_lifecycle():
             user_agent="Test Browser",
             ip_address="127.0.0.1"
         )
-        print(f"✅ PASS: Session created for user {user.id}")
+        print(f"PASS PASS: Session created for user {user.id}")
 
         # Test: Session metadata
         if session.user_agent != "Test Browser":
-            print("❌ FAIL: User agent not stored")
+            print("FAIL FAIL: User agent not stored")
             return False
         if session.ip_address != "127.0.0.1":
-            print("❌ FAIL: IP address not stored")
+            print("FAIL FAIL: IP address not stored")
             return False
-        print("✅ PASS: Session metadata stored correctly")
+        print("PASS PASS: Session metadata stored correctly")
 
         # Test: Validate session (should work)
         validated_user = session_service.validate_session(token)
         if not validated_user or validated_user.id != user.id:
-            print("❌ FAIL: Session validation failed")
+            print("FAIL FAIL: Session validation failed")
             return False
-        print("✅ PASS: Session validation successful")
+        print("PASS PASS: Session validation successful")
 
         # Test: Revoke session
         revoked = session_service.revoke_session(token, reason="Test logout")
         if not revoked:
-            print("❌ FAIL: Session revocation failed")
+            print("FAIL FAIL: Session revocation failed")
             return False
-        print("✅ PASS: Session revoked successfully")
+        print("PASS PASS: Session revoked successfully")
 
         # Test: Validate revoked session (should fail)
         validated_user = session_service.validate_session(token)
         if validated_user:
-            print("❌ FAIL: Revoked session still valid")
+            print("FAIL FAIL: Revoked session still valid")
             return False
-        print("✅ PASS: Revoked session rejected")
+        print("PASS PASS: Revoked session rejected")
 
     return True
 
@@ -310,9 +310,9 @@ def test_session_timeout():
 
         validated_user = session_service.validate_session(token)
         if validated_user:
-            print("❌ FAIL: Expired session still valid")
+            print("FAIL FAIL: Expired session still valid")
             return False
-        print("✅ PASS: Expired session rejected")
+        print("PASS PASS: Expired session rejected")
 
         # Test: Create session with idle timeout
         session2, token2 = session_service.create_session(user_id=user.id)
@@ -323,18 +323,18 @@ def test_session_timeout():
 
         validated_user = session_service.validate_session(token2)
         if validated_user:
-            print("❌ FAIL: Idle session still valid")
+            print("FAIL FAIL: Idle session still valid")
             return False
 
         # Check that session was auto-revoked
         db.session.refresh(session2)
         if not session2.is_revoked:
-            print("❌ FAIL: Idle session not auto-revoked")
+            print("FAIL FAIL: Idle session not auto-revoked")
             return False
         if session2.revoked_reason != "Idle timeout":
-            print(f"❌ FAIL: Wrong revocation reason: {session2.revoked_reason}")
+            print(f"FAIL FAIL: Wrong revocation reason: {session2.revoked_reason}")
             return False
-        print("✅ PASS: Idle session auto-revoked with correct reason")
+        print("PASS PASS: Idle session auto-revoked with correct reason")
 
     return True
 
@@ -359,7 +359,7 @@ def test_revoke_all_sessions():
         session1, token1 = session_service.create_session(user_id=user.id)
         session2, token2 = session_service.create_session(user_id=user.id)
         session3, token3 = session_service.create_session(user_id=user.id)
-        print("✅ PASS: Created 3 sessions")
+        print("PASS PASS: Created 3 sessions")
 
         # Validate all work
         if not all([
@@ -367,16 +367,16 @@ def test_revoke_all_sessions():
             session_service.validate_session(token2),
             session_service.validate_session(token3)
         ]):
-            print("❌ FAIL: Not all sessions valid after creation")
+            print("FAIL FAIL: Not all sessions valid after creation")
             return False
-        print("✅ PASS: All 3 sessions valid")
+        print("PASS PASS: All 3 sessions valid")
 
         # Revoke all sessions
         count = session_service.revoke_all_user_sessions(user.id, reason="Password change")
         if count != 3:
-            print(f"❌ FAIL: Expected 3 revoked, got {count}")
+            print(f"FAIL FAIL: Expected 3 revoked, got {count}")
             return False
-        print(f"✅ PASS: Revoked {count} sessions")
+        print(f"PASS PASS: Revoked {count} sessions")
 
         # Validate all should fail now
         if any([
@@ -384,9 +384,9 @@ def test_revoke_all_sessions():
             session_service.validate_session(token2),
             session_service.validate_session(token3)
         ]):
-            print("❌ FAIL: Some sessions still valid after revoke all")
+            print("FAIL FAIL: Some sessions still valid after revoke all")
             return False
-        print("✅ PASS: All sessions invalidated")
+        print("PASS PASS: All sessions invalidated")
 
     return True
 
@@ -406,38 +406,38 @@ def test_login_logout_flow():
             password="FlowPass123!",
             store_id=store_id
         )
-        print("✅ PASS: User created")
+        print("PASS PASS: User created")
 
         # Test: Login (authenticate + create session)
         authenticated_user = auth_service.authenticate("flowuser", "FlowPass123!")
         if not authenticated_user:
-            print("❌ FAIL: Authentication failed")
+            print("FAIL FAIL: Authentication failed")
             return False
-        print("✅ PASS: User authenticated")
+        print("PASS PASS: User authenticated")
 
         session, token = session_service.create_session(user_id=authenticated_user.id)
-        print("✅ PASS: Session token created")
+        print("PASS PASS: Session token created")
 
         # Test: Token works
         validated_user = session_service.validate_session(token)
         if not validated_user or validated_user.id != user.id:
-            print("❌ FAIL: Token validation failed")
+            print("FAIL FAIL: Token validation failed")
             return False
-        print("✅ PASS: Token validated successfully")
+        print("PASS PASS: Token validated successfully")
 
         # Test: Logout (revoke session)
         revoked = session_service.revoke_session(token)
         if not revoked:
-            print("❌ FAIL: Logout failed")
+            print("FAIL FAIL: Logout failed")
             return False
-        print("✅ PASS: Logout successful")
+        print("PASS PASS: Logout successful")
 
         # Test: Token no longer works
         validated_user = session_service.validate_session(token)
         if validated_user:
-            print("❌ FAIL: Token still valid after logout")
+            print("FAIL FAIL: Token still valid after logout")
             return False
-        print("✅ PASS: Token invalid after logout")
+        print("PASS PASS: Token invalid after logout")
 
     return True
 
@@ -468,10 +468,10 @@ def run_all_tests():
                 passed += 1
             else:
                 failed += 1
-                print(f"\n❌ TEST FAILED: {name}")
+                print(f"\nFAIL TEST FAILED: {name}")
         except Exception as e:
             failed += 1
-            print(f"\n❌ TEST CRASHED: {name}")
+            print(f"\nFAIL TEST CRASHED: {name}")
             print(f"   Error: {str(e)}")
             import traceback
             traceback.print_exc()
@@ -481,7 +481,7 @@ def run_all_tests():
     print("=" * 70)
 
     if failed == 0:
-        print("\n✅ ALL AUTHENTICATION TESTS PASSED")
+        print("\nPASS ALL AUTHENTICATION TESTS PASSED")
         print("\nPhase 6 is PRODUCTION-READY with secure authentication:")
         print("  - bcrypt password hashing (cost factor 12)")
         print("  - Strong password requirements enforced")
@@ -490,7 +490,7 @@ def run_all_tests():
         print("  - Explicit logout and revocation support")
         return True
     else:
-        print(f"\n❌ {failed} TESTS FAILED - DO NOT DEPLOY")
+        print(f"\nFAIL {failed} TESTS FAILED - DO NOT DEPLOY")
         return False
 
 

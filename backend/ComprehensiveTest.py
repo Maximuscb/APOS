@@ -31,15 +31,15 @@ class TestResults:
 
     def add_pass(self, test_name):
         self.passed.append(test_name)
-        print(f"✓ PASS: {test_name}")
+        print(f"PASS PASS: {test_name}")
 
     def add_fail(self, test_name, error):
         self.failed.append((test_name, str(error)))
-        print(f"✗ FAIL: {test_name}: {error}")
+        print(f"FAIL FAIL: {test_name}: {error}")
 
     def add_bug(self, bug_description):
         self.bugs.append(bug_description)
-        print(f"🐛 BUG FOUND: {bug_description}")
+        print(f"BUG BUG FOUND: {bug_description}")
 
     def summary(self):
         total = len(self.passed) + len(self.failed)
@@ -376,7 +376,7 @@ def test_feature_3_products(results):
 
     # List products
     try:
-        resp = client.get(f'/api/products?store_id={store_id}',
+        resp = client.get(f'/api/products'store_id={store_id}',
             headers={'Authorization': f'Bearer {token_str}'})
         if resp.status_code == 200 and 'items' in resp.json:
             results.add_pass("List products")
