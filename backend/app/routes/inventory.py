@@ -1,4 +1,17 @@
 # backend/app/routes/inventory.py
+"""
+Inventory management routes.
+
+SECURITY: All routes require authentication.
+- View operations require VIEW_INVENTORY permission
+- Receive operations require RECEIVE_INVENTORY permission
+- Adjust operations require ADJUST_INVENTORY permission
+- Sale operations require CREATE_SALE permission (called internally)
+
+Time semantics:
+- API accepts ISO-8601 datetimes with Z/offsets; backend normalizes to UTC-naive internally.
+- as_of filtering is inclusive: occurred_at <= as_of.
+"""
 from flask import Blueprint, request
 
 from ..models import InventoryTransaction
@@ -11,13 +24,7 @@ from ..validation import (
     enforce_rules_inventory_adjust,
     enforce_rules_inventory_sale,
 )
-
-
-"""
-Time semantics:
-- API accepts ISO-8601 datetimes with Z/offsets; backend normalizes to UTC-naive internally.
-- as_of filtering is inclusive: occurred_at <= as_of.
-"""
+from ..decorators import require_auth, require_permission
 
 
 inventory_bp = Blueprint("inventory", __name__, url_prefix="/api/inventory")
@@ -47,7 +54,14 @@ INVENTORY_SALE_POLICY = ModelValidationPolicy(
 
 
 @inventory_bp.post("/receive")
+@require_auth
+@require_permission("RECEIVE_INVENTORY")
 def receive_inventory_route():
+    """
+    Receive inventory into stock.
+
+    Requires RECEIVE_INVENTORY permission.
+    """
     payload = request.get_json(silent=True) or {}
 
     try:
@@ -80,7 +94,21 @@ def receive_inventory_route():
 
 
 @inventory_bp.post("/adjust")
+@require_auth
+@require_permission("ADJUST_INVENTORY")
 def adjust_inventory_route():
+    """
+    Adjust inventory (corrections, shrink, etc.).
+
+    Requires ADJUST_INVENTORY permission.
+
+    WHY DRAFT: Manual adjustments default to DRAFT status to require
+    manager approval before affecting inventory. This prevents accidental
+    or unauthorized changes to inventory levels.
+
+    To post immediately (e.g., from approved cycle counts), include
+    {"status": "POSTED"} in the request body.
+    """
     payload = request.get_json(silent=True) or {}
 
     try:
@@ -96,6 +124,12 @@ def adjust_inventory_route():
 
     from ..services.inventory_service import adjust_inventory, get_inventory_summary
 
+    # Default to DRAFT for adjustments - requires approval workflow
+    # Client can override with status="POSTED" for pre-approved adjustments
+    status = payload.get("status", "DRAFT")
+    if status not in ("DRAFT", "POSTED"):
+        return {"error": "status must be DRAFT or POSTED"}, 400
+
     try:
         created_tx = adjust_inventory(
             store_id=patch["store_id"],
@@ -103,6 +137,7 @@ def adjust_inventory_route():
             quantity_delta=patch["quantity_delta"],
             occurred_at=patch.get("occurred_at"),
             note=patch.get("note"),
+            status=status,  # Pass the status to the service
         )
     except ValueError as e:
         return {"error": str(e)}, 400
@@ -112,7 +147,14 @@ def adjust_inventory_route():
 
 
 @inventory_bp.get("/<int:product_id>/summary")
+@require_auth
+@require_permission("VIEW_INVENTORY")
 def inventory_summary_route(product_id: int):
+    """
+    Get inventory summary for a product.
+
+    Requires VIEW_INVENTORY permission.
+    """
     store_id = request.args.get("store_id", type=int)
 
     as_of_raw = request.args.get("as_of")  # optional ISO string
@@ -134,7 +176,14 @@ def inventory_summary_route(product_id: int):
 
 
 @inventory_bp.get("/<int:product_id>/transactions")
+@require_auth
+@require_permission("VIEW_INVENTORY")
 def inventory_transactions_route(product_id: int):
+    """
+    List inventory transactions for a product.
+
+    Requires VIEW_INVENTORY permission.
+    """
     store_id = request.args.get("store_id", type=int)
     if store_id is None:
         return {"error": "store_id is required"}, 400
@@ -160,8 +209,17 @@ def inventory_transactions_route(product_id: int):
     except ValueError as e:
         return {"error": str(e)}, 400
 
+
 @inventory_bp.post("/sale")
+@require_auth
+@require_permission("CREATE_SALE")
 def sale_inventory_route():
+    """
+    Record a sale transaction (inventory decrement).
+
+    Requires CREATE_SALE permission.
+    Note: This is typically called internally by the sales service.
+    """
     payload = request.get_json(silent=True) or {}
 
     try:

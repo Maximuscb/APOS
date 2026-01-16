@@ -13,34 +13,38 @@ WHY SEPARATE ROUTES:
 - Makes it clear which endpoints affect document state vs. creating new documents
 - Enables easy authorization rules (e.g., only managers can approve/post)
 
-DESIGN NOTES:
-- These routes will require user authentication once Phase 4 (Auth) is implemented
-- For now, approved_by_user_id and posted_by_user_id are nullable
-- Bulk operations (approve/post multiple) are stubbed for future implementation
+SECURITY:
+- All routes require authentication
+- Approve/post operations require APPROVE_DOCUMENTS and POST_DOCUMENTS permissions
+- User IDs are taken from the authenticated session (g.current_user), NOT from request body
+- This prevents spoofing of the audit trail
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 
 from ..models import InventoryTransaction
 from ..services import lifecycle_service
 from ..services.lifecycle_service import LifecycleError
 from ..validation import ValidationError
+from ..decorators import require_auth, require_permission
 
 
 lifecycle_bp = Blueprint("lifecycle", __name__, url_prefix="/api/lifecycle")
 
 
 @lifecycle_bp.post("/approve/<int:transaction_id>")
+@require_auth
+@require_permission("APPROVE_DOCUMENTS")
 def approve_transaction_route(transaction_id: int):
     """
     Approve a DRAFT transaction (DRAFT → APPROVED).
 
+    Requires APPROVE_DOCUMENTS permission.
+
     WHY: Review workflow - data entry creates DRAFT, manager approves it.
 
-    Request body (optional):
-        {
-            "approved_by_user_id": <int>  // Future: once User model exists
-        }
+    SECURITY: approved_by_user_id is taken from the authenticated session,
+    NOT from the request body. This prevents audit trail spoofing.
 
     Response:
         {
@@ -48,15 +52,14 @@ def approve_transaction_route(transaction_id: int):
         }
 
     Error responses:
+        401: Not authenticated
+        403: Missing APPROVE_DOCUMENTS permission
         404: Transaction not found
         400: Transaction not in DRAFT status (lifecycle error)
-        400: Invalid state transition
     """
     try:
-        # TODO (Phase 4): Extract approved_by_user_id from authenticated session
-        # For now, accept from request body (optional)
-        data = request.get_json() or {}
-        approved_by_user_id = data.get("approved_by_user_id")
+        # SECURITY: Use authenticated user from session, NOT from request body
+        approved_by_user_id = g.current_user.id
 
         tx = lifecycle_service.approve_transaction(
             transaction_id,
@@ -80,9 +83,13 @@ def approve_transaction_route(transaction_id: int):
 
 
 @lifecycle_bp.post("/post/<int:transaction_id>")
+@require_auth
+@require_permission("POST_DOCUMENTS")
 def post_transaction_route(transaction_id: int):
     """
     Post an APPROVED transaction (APPROVED → POSTED).
+
+    Requires POST_DOCUMENTS permission.
 
     WHY: Finalize approved transaction - makes it affect inventory calculations
     and appends to master ledger.
@@ -90,10 +97,8 @@ def post_transaction_route(transaction_id: int):
     CRITICAL: Once POSTED, a transaction becomes immutable. This cannot be undone.
     Incorrect transactions must be corrected with reversal transactions.
 
-    Request body (optional):
-        {
-            "posted_by_user_id": <int>  // Future: once User model exists
-        }
+    SECURITY: posted_by_user_id is taken from the authenticated session,
+    NOT from the request body. This prevents audit trail spoofing.
 
     Response:
         {
@@ -101,15 +106,14 @@ def post_transaction_route(transaction_id: int):
         }
 
     Error responses:
+        401: Not authenticated
+        403: Missing POST_DOCUMENTS permission
         404: Transaction not found
         400: Transaction not in APPROVED status (lifecycle error)
-        400: Invalid state transition
     """
     try:
-        # TODO (Phase 4): Extract posted_by_user_id from authenticated session
-        # For now, accept from request body (optional)
-        data = request.get_json() or {}
-        posted_by_user_id = data.get("posted_by_user_id")
+        # SECURITY: Use authenticated user from session, NOT from request body
+        posted_by_user_id = g.current_user.id
 
         tx = lifecycle_service.post_transaction(
             transaction_id,
@@ -133,9 +137,13 @@ def post_transaction_route(transaction_id: int):
 
 
 @lifecycle_bp.get("/pending")
+@require_auth
+@require_permission("VIEW_INVENTORY")
 def list_pending_transactions_route():
     """
     List DRAFT transactions that need approval.
+
+    Requires VIEW_INVENTORY permission.
 
     WHY: Manager approval queue - shows what needs to be reviewed.
 
@@ -178,9 +186,13 @@ def list_pending_transactions_route():
 
 
 @lifecycle_bp.get("/approved")
+@require_auth
+@require_permission("VIEW_INVENTORY")
 def list_approved_transactions_route():
     """
     List APPROVED transactions ready to be posted.
+
+    Requires VIEW_INVENTORY permission.
 
     WHY: Shows transactions that have been reviewed and are ready to
     affect inventory. Useful for batch posting workflows.
@@ -231,16 +243,19 @@ def list_approved_transactions_route():
 # ================================================================================
 
 @lifecycle_bp.post("/approve/batch")
+@require_auth
+@require_permission("APPROVE_DOCUMENTS")
 def approve_transactions_batch_route():
     """
     Approve multiple DRAFT transactions at once.
+
+    Requires APPROVE_DOCUMENTS permission.
 
     NOT YET IMPLEMENTED - returns 501 Not Implemented.
 
     Expected request body:
         {
-            "transaction_ids": [1, 2, 3, ...],
-            "approved_by_user_id": <int>  // Future
+            "transaction_ids": [1, 2, 3, ...]
         }
 
     Expected response:
@@ -259,16 +274,19 @@ def approve_transactions_batch_route():
 
 
 @lifecycle_bp.post("/post/batch")
+@require_auth
+@require_permission("POST_DOCUMENTS")
 def post_transactions_batch_route():
     """
     Post multiple APPROVED transactions at once.
+
+    Requires POST_DOCUMENTS permission.
 
     NOT YET IMPLEMENTED - returns 501 Not Implemented.
 
     Expected request body:
         {
-            "transaction_ids": [1, 2, 3, ...],
-            "posted_by_user_id": <int>  // Future
+            "transaction_ids": [1, 2, 3, ...]
         }
 
     Expected response:

@@ -68,6 +68,7 @@ def init_system():
 
     default_users = [
         ("admin", "admin@apos.local", "admin", default_password),
+        ("developer", "developer@apos.local", "developer", default_password),
         ("manager", "manager@apos.local", "manager", default_password),
         ("cashier", "cashier@apos.local", "cashier", default_password),
     ]
@@ -97,9 +98,10 @@ def init_system():
     click.echo("✨ APOS System Initialized Successfully!")
     click.echo("="*60)
     click.echo("\n📝 Default Credentials (CHANGE IN PRODUCTION!):")
-    click.echo("   admin    → admin@apos.local    / Password123!")
-    click.echo("   manager  → manager@apos.local  / Password123!")
-    click.echo("   cashier  → cashier@apos.local  / Password123!")
+    click.echo("   admin     → admin@apos.local     / Password123!")
+    click.echo("   developer → developer@apos.local / Password123!")
+    click.echo("   manager   → manager@apos.local   / Password123!")
+    click.echo("   cashier   → cashier@apos.local   / Password123!")
     click.echo("\n🔒 SECURITY WARNING:")
     click.echo("   - Passwords are now hashed with bcrypt (secure)")
     click.echo("   - Change all passwords immediately in production!")

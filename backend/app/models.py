@@ -277,14 +277,22 @@ class ProductIdentifier(db.Model):
     - VENDOR_CODE: Supplier's product code (scoped to vendor)
 
     Uniqueness rules:
-    - SKU/UPC: Globally unique across organization
-    - VENDOR_CODE: Unique within vendor scope
+    - SKU/UPC/ALT_BARCODE: Globally unique across organization (type + value)
+    - VENDOR_CODE: Unique within vendor scope (type + value + vendor_id)
+
+    SOFT DELETE: Identifiers use is_active flag instead of hard delete.
+    This preserves audit history while removing from lookups.
     """
     __tablename__ = "product_identifiers"
     __table_args__ = (
+        # NOTE: For VENDOR_CODE, uniqueness is (type, value, vendor_id)
+        # For other types, uniqueness is just (type, value)
+        # This constraint enforces the broader case; application logic
+        # handles vendor-scoped uniqueness for VENDOR_CODE
         db.UniqueConstraint("type", "value", name="uq_identifier_type_value"),
         db.Index("ix_identifier_value", "value"),
         db.Index("ix_identifier_product", "product_id"),
+        db.Index("ix_identifier_active", "is_active"),
         {"sqlite_autoincrement": True},
     )
 
@@ -302,7 +310,11 @@ class ProductIdentifier(db.Model):
 
     is_primary = db.Column(db.Boolean, nullable=False, default=False)
 
+    # Soft delete flag - inactive identifiers are excluded from lookups
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    deactivated_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     product = db.relationship("Product", backref=db.backref("identifiers", lazy=True))
 
@@ -314,7 +326,9 @@ class ProductIdentifier(db.Model):
             "value": self.value,
             "vendor_id": self.vendor_id,
             "is_primary": self.is_primary,
+            "is_active": self.is_active,
             "created_at": to_utc_z(self.created_at),
+            "deactivated_at": to_utc_z(self.deactivated_at) if self.deactivated_at else None,
         }
 
 

@@ -1,10 +1,19 @@
 # backend/app/routes/auth.py
-"""Phase 6: Production-Ready Authentication API routes"""
+"""
+Phase 6: Production-Ready Authentication API routes
+
+SECURITY FEATURES:
+- Password strength validation on registration
+- Login throttling to prevent brute-force attacks
+- Account lockout after repeated failed attempts
+- Session management with token-based auth
+"""
 
 from flask import Blueprint, request, jsonify
 
 from ..services import auth_service
 from ..services import session_service
+from ..services import login_throttle_service
 from ..services.auth_service import PasswordValidationError
 
 
@@ -51,7 +60,10 @@ def login_route():
     Returns user info and session token on success.
     Token must be included in Authorization header for protected routes.
 
-    WHY: Session tokens enable stateless authentication with timeout.
+    SECURITY:
+    - Checks for account lockout before attempting authentication
+    - Records failed attempts for throttling
+    - Records successful logins for audit trail
     """
     try:
         data = request.get_json()
@@ -61,15 +73,60 @@ def login_route():
         if not all([username, password]):
             return jsonify({"error": "username/email and password required"}), 400
 
+        user_agent = request.headers.get("User-Agent")
+        ip_address = request.remote_addr
+
+        # Check if account is locked due to too many failed attempts
+        is_locked, seconds_remaining = login_throttle_service.is_account_locked(username)
+        if is_locked:
+            minutes_remaining = (seconds_remaining // 60) + 1 if seconds_remaining else 15
+            return jsonify({
+                "error": "Account temporarily locked due to too many failed login attempts",
+                "locked": True,
+                "retry_after_seconds": seconds_remaining,
+                "retry_after_minutes": minutes_remaining,
+            }), 429  # Too Many Requests
+
         # Authenticate user
         user = auth_service.authenticate(username, password)
 
         if not user:
-            return jsonify({"error": "Invalid credentials"}), 401
+            # Record failed attempt
+            failed_count = login_throttle_service.record_failed_attempt(
+                identifier=username,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                reason="Invalid credentials"
+            )
+
+            # Check if this failure triggered a lockout
+            max_attempts = login_throttle_service.MAX_FAILED_ATTEMPTS
+            remaining = max_attempts - failed_count
+
+            if remaining <= 0:
+                return jsonify({
+                    "error": "Account locked due to too many failed login attempts",
+                    "locked": True,
+                    "retry_after_minutes": 15,
+                }), 429
+            elif remaining <= 3:
+                # Warn user they're close to lockout
+                return jsonify({
+                    "error": "Invalid credentials",
+                    "warning": f"{remaining} attempts remaining before account lockout"
+                }), 401
+            else:
+                return jsonify({"error": "Invalid credentials"}), 401
+
+        # Record successful login
+        login_throttle_service.record_successful_login(
+            user_id=user.id,
+            identifier=username,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
 
         # Create session token
-        user_agent = request.headers.get("User-Agent")
-        ip_address = request.remote_addr
         session, token = session_service.create_session(
             user_id=user.id,
             user_agent=user_agent,
@@ -85,6 +142,18 @@ def login_route():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@auth_bp.get("/lockout-status/<identifier>")
+def lockout_status_route(identifier: str):
+    """
+    Check lockout status for an account.
+
+    This is a public endpoint to allow users to check if their account is locked
+    and when they can retry.
+    """
+    status = login_throttle_service.get_lockout_status(identifier)
+    return jsonify(status)
 
 
 @auth_bp.post("/logout")

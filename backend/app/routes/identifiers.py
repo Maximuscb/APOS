@@ -1,17 +1,31 @@
 # backend/app/routes/identifiers.py
-"""Phase 2: Identifier API routes"""
+"""
+Phase 2: Identifier API routes
+
+SECURITY: All routes require authentication.
+- Lookup operations require VIEW_INVENTORY permission (inventory data shouldn't be public)
+- Adding identifiers requires MANAGE_IDENTIFIERS permission
+- Deactivating identifiers requires MANAGE_IDENTIFIERS permission
+"""
 
 from flask import Blueprint, request, jsonify
 
 from ..services import identifier_service
+from ..decorators import require_auth, require_permission
 
 
 identifiers_bp = Blueprint("identifiers", __name__, url_prefix="/api/identifiers")
 
 
 @identifiers_bp.get("/lookup/<value>")
+@require_auth
+@require_permission("VIEW_INVENTORY")
 def lookup_product_route(value: str):
-    """Lookup product by any identifier."""
+    """
+    Lookup product by any identifier.
+
+    Requires VIEW_INVENTORY permission.
+    """
     try:
         vendor_id = request.args.get("vendor_id", type=int)
         product = identifier_service.lookup_product(value, vendor_id)
@@ -28,8 +42,14 @@ def lookup_product_route(value: str):
 
 
 @identifiers_bp.post("/")
+@require_auth
+@require_permission("MANAGE_IDENTIFIERS")
 def add_identifier_route():
-    """Add identifier to product."""
+    """
+    Add identifier to product.
+
+    Requires MANAGE_IDENTIFIERS permission.
+    """
     try:
         data = request.get_json()
         product_id = data.get("product_id")
@@ -50,6 +70,61 @@ def add_identifier_route():
         )
 
         return jsonify({"identifier": identifier.to_dict()}), 201
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
+
+@identifiers_bp.post("/<int:identifier_id>/deactivate")
+@require_auth
+@require_permission("MANAGE_IDENTIFIERS")
+def deactivate_identifier_route(identifier_id: int):
+    """
+    Deactivate an identifier (soft delete).
+
+    Requires MANAGE_IDENTIFIERS permission.
+
+    WHY: Instead of hard-deleting identifiers, we deactivate them so they
+    won't be found in lookups but remain for audit history.
+    """
+    try:
+        identifier = identifier_service.deactivate_identifier(identifier_id)
+
+        if not identifier:
+            return jsonify({"error": "Identifier not found"}), 404
+
+        return jsonify({
+            "identifier": identifier.to_dict(),
+            "message": "Identifier deactivated successfully"
+        }), 200
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
+
+@identifiers_bp.post("/<int:identifier_id>/reactivate")
+@require_auth
+@require_permission("MANAGE_IDENTIFIERS")
+def reactivate_identifier_route(identifier_id: int):
+    """
+    Reactivate a previously deactivated identifier.
+
+    Requires MANAGE_IDENTIFIERS permission.
+    """
+    try:
+        identifier = identifier_service.reactivate_identifier(identifier_id)
+
+        if not identifier:
+            return jsonify({"error": "Identifier not found"}), 404
+
+        return jsonify({
+            "identifier": identifier.to_dict(),
+            "message": "Identifier reactivated successfully"
+        }), 200
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400

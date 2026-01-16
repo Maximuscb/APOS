@@ -72,14 +72,18 @@ def verify_password(password: str, password_hash: str) -> bool:
     Verify password against bcrypt hash.
 
     Returns True if password matches hash, False otherwise.
-    Handles both new bcrypt hashes and legacy STUB_HASH for migration.
 
     WHY timing-safe: bcrypt.checkpw() prevents timing attacks automatically.
+
+    SECURITY: Legacy STUB_HASH_ format has been removed. All passwords must
+    use proper bcrypt hashing. If legacy accounts exist, they must reset
+    their passwords or be migrated via admin tooling.
     """
-    # Handle legacy stub hashes during migration period
+    # SECURITY: Reject legacy stub hashes - they are insecure
     if password_hash.startswith("STUB_HASH_"):
-        # Legacy stub hash - allow for backward compatibility
-        return password_hash == f"STUB_HASH_{password}"
+        # Log this attempt for security monitoring
+        # Legacy stub hashes are no longer supported
+        return False
 
     # Production bcrypt verification
     try:
@@ -176,6 +180,7 @@ def create_default_roles():
     """Create standard roles if they don't exist."""
     roles = [
         ("admin", "Full system access"),
+        ("developer", "Full system access with role assignment for development/testing"),
         ("manager", "Store management and approvals"),
         ("cashier", "POS sales only"),
     ]

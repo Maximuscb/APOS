@@ -92,10 +92,16 @@ def validate_session(token: str) -> User | None:
     """
     Validate session token and return User if valid.
 
-    Returns None if token is invalid, expired, or revoked.
+    Returns None if:
+    - Token is invalid, expired, or revoked
+    - User account is deactivated (is_active=False)
+
     Updates last_used_at on successful validation (activity tracking).
 
     WHY: Central validation point. All protected routes call this.
+
+    SECURITY: Also checks user.is_active to ensure deactivated users
+    cannot continue using existing sessions.
     """
     token_hash = hash_token(token)
     now = utcnow()
@@ -123,12 +129,24 @@ def validate_session(token: str) -> User | None:
         db.session.commit()
         return None
 
+    # Get the associated user
+    user = session.user
+
+    # SECURITY: Check if user account is active
+    # Deactivated users should not be able to use existing sessions
+    if not user or not user.is_active:
+        # Auto-revoke session for deactivated user
+        session.is_revoked = True
+        session.revoked_at = now
+        session.revoked_reason = "User account deactivated"
+        db.session.commit()
+        return None
+
     # Valid session - update activity timestamp
     session.last_used_at = now
     db.session.commit()
 
-    # Return associated user
-    return session.user
+    return user
 
 
 def revoke_session(token: str, reason: str = "User logout") -> bool:

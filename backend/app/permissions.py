@@ -224,12 +224,48 @@ PERMISSION_DEFINITIONS = [
 
 # WHY these mappings:
 # - ADMIN: Full access to everything (trust model)
+# - DEVELOPER: Full access including role assignment (for development/testing)
 # - MANAGER: Can approve, manage inventory, view reports, manage users
 # - CASHIER: POS only (create/post sales, view inventory for selling)
 
 DEFAULT_ROLE_PERMISSIONS = {
     "admin": [
         # Admin gets ALL permissions
+        "CREATE_REGISTER",
+        "MANAGE_REGISTER",
+        "VIEW_INVENTORY",
+        "RECEIVE_INVENTORY",
+        "ADJUST_INVENTORY",
+        "APPROVE_ADJUSTMENTS",
+        "VIEW_COGS",
+        "CREATE_SALE",
+        "POST_SALE",
+        "VOID_SALE",
+        "PROCESS_RETURN",
+        "VIEW_SALES_REPORTS",
+        "APPROVE_DOCUMENTS",
+        "POST_DOCUMENTS",
+        "VIEW_DOCUMENTS",
+        "CREATE_TRANSFERS",
+        "CREATE_COUNTS",
+        "VIEW_USERS",
+        "CREATE_USER",
+        "EDIT_USER",
+        "ASSIGN_ROLES",
+        "DEACTIVATE_USER",
+        "MANAGE_PRODUCTS",
+        "MANAGE_IDENTIFIERS",
+        "VIEW_AUDIT_LOG",
+        "VIEW_STORES",
+        "MANAGE_STORES",
+        "MANAGE_PERMISSIONS",
+        "SYSTEM_ADMIN",
+    ],
+
+    "developer": [
+        # Developer: Full system access including role assignment
+        # Used for development and testing environments
+        # Has all permissions to facilitate testing and debugging
         "CREATE_REGISTER",
         "MANAGE_REGISTER",
         "VIEW_INVENTORY",
