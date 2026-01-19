@@ -4,17 +4,74 @@ from .extensions import db
 from app.time_utils import to_utc_z
 
 
-class Store(db.Model):
+class Organization(db.Model):
     """
-    Phase 1.2: Minimal model to prove migrations work.
-    This will later support multi-store deployments.
+    Multi-tenant root: Every tenant is an Organization.
+
+    WHY: Enables shared-database multi-tenancy with strict isolation.
+    All stores, users, and data belong to exactly one organization.
+    No data may cross organization boundaries.
+
+    DESIGN:
+    - Organizations are the tenant boundary
+    - Stores belong to organizations (org_id FK)
+    - All queries must be scoped by org_id (via store or directly)
+    - Users belong to organizations (org_id FK)
     """
-    __tablename__ = "stores"
+    __tablename__ = "organizations"
     __table_args__ = {"sqlite_autoincrement": True}
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(120), nullable=False, unique=True)
-    code = db.Column(db.String(32), nullable=True, unique=True, index=True)
+    name = db.Column(db.String(255), nullable=False)
+    code = db.Column(db.String(32), nullable=True, unique=True, index=True)  # Short code for lookups
+
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+    )
+    updated_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+        onupdate=db.func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Organization id={self.id} name={self.name!r}>"
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "code": self.code,
+            "is_active": self.is_active,
+            "created_at": to_utc_z(self.created_at),
+            "updated_at": to_utc_z(self.updated_at),
+        }
+
+
+class Store(db.Model):
+    """
+    Store within an organization.
+
+    MULTI-TENANT: Stores are scoped to organizations via org_id.
+    Store names and codes are unique within an organization, not globally.
+    """
+    __tablename__ = "stores"
+    __table_args__ = (
+        db.UniqueConstraint("org_id", "name", name="uq_stores_org_name"),
+        db.UniqueConstraint("org_id", "code", name="uq_stores_org_code"),
+        db.Index("ix_stores_org_id", "org_id"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    code = db.Column(db.String(32), nullable=True, index=True)
     parent_store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=True, index=True)
     version_id = db.Column(db.Integer, nullable=False, default=1)
     created_at = db.Column(
@@ -23,16 +80,18 @@ class Store(db.Model):
         server_default=db.func.now(),
     )
 
+    organization = db.relationship("Organization", backref=db.backref("stores", lazy=True))
     parent_store = db.relationship("Store", remote_side=[id], backref=db.backref("child_stores", lazy=True))
 
     __mapper_args__ = {"version_id_col": version_id}
 
     def __repr__(self) -> str:
-        return f"<Store id={self.id} name={self.name!r}>"
+        return f"<Store id={self.id} name={self.name!r} org_id={self.org_id}>"
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "org_id": self.org_id,
             "name": self.name,
             "code": self.code,
             "parent_store_id": self.parent_store_id,
@@ -42,12 +101,6 @@ class Store(db.Model):
 
 
 class StoreConfig(db.Model):
-    """
-    Phase 13: Store-level configuration settings.
-
-    WHY: Each store may need localized settings (hours, contact info,
-    default inventory state, etc.) without hardcoding per-deployment values.
-    """
     __tablename__ = "store_configs"
     __table_args__ = (
         db.UniqueConstraint("store_id", "key", name="uq_store_configs_store_key"),
@@ -139,18 +192,14 @@ class InventoryTransaction(db.Model):
     store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False, index=True)
 
-    # Phase 3: "RECEIVE" | "ADJUST"
     type = db.Column(db.String(32), nullable=False, index=True)
 
-    # Positive for RECEIVE, +/- for ADJUST
     quantity_delta = db.Column(db.Integer, nullable=False)
 
-    # Required for RECEIVE; must be NULL for ADJUST (enforced centrally, not here)
     unit_cost_cents = db.Column(db.Integer, nullable=True)
 
     note = db.Column(db.String(255), nullable=True)
 
-    # "As-of" timestamp for historical queries
     occurred_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
@@ -158,37 +207,17 @@ class InventoryTransaction(db.Model):
         index=True,
     )
 
-    # Row creation timestamp
     created_at = db.Column(
         db.DateTime(timezone=True),
         nullable=False,
         server_default=db.func.now(),
     )
 
-    # Phase 4: SALE idempotency + traceability
     sale_id = db.Column(db.String(64), nullable=True, index=True)
     sale_line_id = db.Column(db.String(64), nullable=True)
 
-    # Phase 4: immutable cost snapshot at sale time (COGS)
     unit_cost_cents_at_sale = db.Column(db.Integer, nullable=True)
     cogs_cents = db.Column(db.Integer, nullable=True)
-
-    # ==================================================================================
-    # Phase 5: Document Lifecycle (Draft -> Approved -> Posted)
-    # ==================================================================================
-    # WHY: Prevents accidental posting, enables review workflows, and allows
-    # AI-generated drafts later without risk. Only POSTED transactions affect
-    # inventory calculations (on-hand qty, WAC, COGS).
-    #
-    # State transition rules (see lifecycle_service.py):
-    # - DRAFT -> APPROVED (requires approval authority)
-    # - APPROVED -> POSTED (finalizes; irreversible; affects ledger)
-    # - Cannot skip states (DRAFT -> POSTED is forbidden)
-    # - Cannot reverse transitions (POSTED -> APPROVED is forbidden)
-    #
-    # Default: POSTED (for backwards compatibility with existing transactions)
-    # New transactions default to DRAFT unless explicitly posted.
-    # ==================================================================================
 
     status = db.Column(
         db.String(16),
@@ -197,43 +226,24 @@ class InventoryTransaction(db.Model):
         index=True,  # Frequently filtered in queries
     )
 
-    # Approval audit trail (nullable until User model exists)
-    # approved_by_user_id will reference users.id once auth is implemented
     approved_by_user_id = db.Column(db.Integer, nullable=True)
     approved_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
-    # Posting audit trail (nullable until User model exists)
-    # posted_by_user_id will reference users.id once auth is implemented
     posted_by_user_id = db.Column(db.Integer, nullable=True)
     posted_at = db.Column(db.DateTime(timezone=True), nullable=True)
-
-    # ==================================================================================
-    # Phase 11: Inventory State Tracking
-    # ==================================================================================
-    # WHY: Track different inventory states (SELLABLE, DAMAGED, IN_TRANSIT, RESERVED)
-    # to provide better visibility and control over inventory disposition.
-    #
-    # State meanings:
-    # - SELLABLE: Available for sale (default)
-    # - DAMAGED: Damaged goods, not sellable
-    # - IN_TRANSIT: Being transferred between locations
-    # - RESERVED: Reserved for customer orders/holds
-    #
-    # Default: SELLABLE (backwards compatibility with existing transactions)
-    # ==================================================================================
 
     inventory_state = db.Column(
         db.String(16),
         nullable=False,
         default="SELLABLE",
-        index=True,  # Frequently filtered in queries
+        index=True, 
     )
 
     __table_args__ = (
         db.Index("ix_invtx_store_product_occurred", "store_id", "product_id", "occurred_at"),
         db.Index("ix_invtx_store_product_type_occurred", "store_id", "product_id", "type", "occurred_at"),
         db.UniqueConstraint("store_id", "sale_id", "sale_line_id", name="uq_invtx_store_sale_line"),
-        {"sqlite_autoincrement": True},   # MUST be last
+        {"sqlite_autoincrement": True},  
     )
 
 
@@ -264,31 +274,10 @@ class InventoryTransaction(db.Model):
         }
 
 class ProductIdentifier(db.Model):
-    """
-    Phase 2: First-class identifier system for products.
 
-    WHY: Prevents silent mis-scans and barcode chaos. Identifiers are NOT just
-    strings on products - they have type, scope, and uniqueness rules.
-
-    Types:
-    - SKU: Store-level unique identifier (internal)
-    - UPC: Universal Product Code (scannable, globally unique)
-    - ALT_BARCODE: Alternative barcode (e.g., case barcode)
-    - VENDOR_CODE: Supplier's product code (scoped to vendor)
-
-    Uniqueness rules:
-    - SKU/UPC/ALT_BARCODE: Globally unique across organization (type + value)
-    - VENDOR_CODE: Unique within vendor scope (type + value + vendor_id)
-
-    SOFT DELETE: Identifiers use is_active flag instead of hard delete.
-    This preserves audit history while removing from lookups.
-    """
     __tablename__ = "product_identifiers"
     __table_args__ = (
-        # NOTE: For VENDOR_CODE, uniqueness is (type, value, vendor_id)
-        # For other types, uniqueness is just (type, value)
-        # This constraint enforces the broader case; application logic
-        # handles vendor-scoped uniqueness for VENDOR_CODE
+    
         db.UniqueConstraint("type", "value", name="uq_identifier_type_value"),
         db.Index("ix_identifier_value", "value"),
         db.Index("ix_identifier_product", "product_id"),
@@ -1205,17 +1194,29 @@ class CountLine(db.Model):
 
 class User(db.Model):
     """
-    Phase 4: User accounts for authentication and attribution.
+    User accounts for authentication and attribution.
+
+    MULTI-TENANT: Users belong to exactly one organization (org_id).
+    Username and email are unique within an organization, not globally.
+    This allows different tenants to have users with the same username.
 
     WHY: Every action must be attributable. No shared logins.
     """
     __tablename__ = "users"
-    __table_args__ = {"sqlite_autoincrement": True}
+    __table_args__ = (
+        db.UniqueConstraint("org_id", "username", name="uq_users_org_username"),
+        db.UniqueConstraint("org_id", "email", name="uq_users_org_email"),
+        db.Index("ix_users_org_id", "org_id"),
+        {"sqlite_autoincrement": True},
+    )
 
     id = db.Column(db.Integer, primary_key=True)
 
-    username = db.Column(db.String(64), nullable=False, unique=True, index=True)
-    email = db.Column(db.String(255), nullable=False, unique=True)
+    # MULTI-TENANT: User belongs to exactly one organization
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+
+    username = db.Column(db.String(64), nullable=False, index=True)
+    email = db.Column(db.String(255), nullable=False)
 
     # Bcrypt hashed password
     password_hash = db.Column(db.String(255), nullable=False)
@@ -1228,11 +1229,13 @@ class User(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
+    organization = db.relationship("Organization", backref=db.backref("users", lazy=True))
     store = db.relationship("Store", backref=db.backref("users", lazy=True))
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "org_id": self.org_id,
             "username": self.username,
             "email": self.email,
             "store_id": self.store_id,
@@ -1353,7 +1356,10 @@ class RolePermission(db.Model):
 
 class SecurityEvent(db.Model):
     """
-    Phase 7: Security event audit log.
+    Security event audit log with tenant context.
+
+    MULTI-TENANT: Security events are scoped to organizations for isolation.
+    Events must include org_id (and store_id where applicable) for tenant filtering.
 
     WHY: Track permission checks, failed attempts, and security-relevant actions.
     Critical for detecting unauthorized access attempts and compliance.
@@ -1364,10 +1370,16 @@ class SecurityEvent(db.Model):
     __table_args__ = (
         db.Index("ix_security_events_user_type", "user_id", "event_type"),
         db.Index("ix_security_events_occurred", "occurred_at"),
+        db.Index("ix_security_events_org_occurred", "org_id", "occurred_at"),
         {"sqlite_autoincrement": True},
     )
 
     id = db.Column(db.Integer, primary_key=True)
+
+    # MULTI-TENANT: Tenant context for isolation
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=True, index=True)  # Nullable for pre-auth events
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=True, index=True)
+
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)  # Nullable for anonymous
 
     # Event classification
@@ -1385,11 +1397,15 @@ class SecurityEvent(db.Model):
 
     occurred_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), index=True)
 
+    organization = db.relationship("Organization", backref=db.backref("security_events", lazy=True))
+    store = db.relationship("Store", backref=db.backref("security_events", lazy=True))
     user = db.relationship("User", backref=db.backref("security_events", lazy=True))
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "org_id": self.org_id,
+            "store_id": self.store_id,
             "user_id": self.user_id,
             "event_type": self.event_type,
             "resource": self.resource,
@@ -1403,25 +1419,37 @@ class SecurityEvent(db.Model):
 
 class SessionToken(db.Model):
     """
-    Phase 6: Secure session token management.
+    Secure session token management with tenant context.
+
+    MULTI-TENANT: Session tokens carry org_id and store_id to establish
+    tenant context for every authenticated request. This enables tenant
+    isolation without repeated database lookups.
 
     WHY: Stateless auth tokens with timeout and revocation support.
     Tokens are cryptographically secure random strings (32 bytes = 64 hex chars).
 
     SECURITY NOTES:
-    - Tokens stored hashed in database (bcrypt)
+    - Tokens stored hashed in database (SHA-256)
     - 24-hour absolute timeout
     - 2-hour idle timeout
     - Revocable on logout or suspicious activity
+    - Tenant context (org_id) is immutable for the session lifetime
     """
     __tablename__ = "session_tokens"
     __table_args__ = (
         db.Index("ix_session_tokens_user_active", "user_id", "is_revoked"),
+        db.Index("ix_session_tokens_org_id", "org_id"),
         {"sqlite_autoincrement": True},
     )
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+
+    # MULTI-TENANT: Tenant context captured at session creation
+    # org_id is required and immutable for the session lifetime
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+    # store_id is the user's primary/current store (nullable for org-level users)
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=True, index=True)
 
     # Token hash (never store plaintext tokens!)
     token_hash = db.Column(db.String(255), nullable=False, unique=True, index=True)
@@ -1441,11 +1469,15 @@ class SessionToken(db.Model):
     ip_address = db.Column(db.String(45), nullable=True)  # IPv6 max length
 
     user = db.relationship("User", backref=db.backref("session_tokens", lazy=True))
+    organization = db.relationship("Organization", backref=db.backref("session_tokens", lazy=True))
+    store = db.relationship("Store", backref=db.backref("session_tokens", lazy=True))
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "org_id": self.org_id,
+            "store_id": self.store_id,
             "created_at": to_utc_z(self.created_at),
             "last_used_at": to_utc_z(self.last_used_at),
             "expires_at": to_utc_z(self.expires_at),

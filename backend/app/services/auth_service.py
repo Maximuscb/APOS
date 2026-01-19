@@ -1,20 +1,24 @@
 """
-Phase 6: Production-Ready Authentication Service
+Production-Ready Authentication Service with Multi-Tenant Support
 
 WHY: Every action must be attributable. Uses bcrypt for secure password
 hashing and validates password strength.
+
+MULTI-TENANT: Users belong to exactly one organization (org_id).
+User creation requires org_id. Username/email uniqueness is tenant-scoped.
 
 SECURITY NOTES:
 - Passwords hashed with bcrypt (cost factor 12)
 - Minimum 8 characters required
 - Must contain uppercase, lowercase, digit, and special char
 - Session tokens managed separately (see session_service.py)
+- User authentication validates org is active
 """
 
 import bcrypt
 import re
 from ..extensions import db
-from ..models import User, Role, UserRole
+from ..models import User, Role, UserRole, Organization
 from app.time_utils import utcnow
 
 
@@ -92,27 +96,69 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_user(username: str, email: str, password: str, store_id: int | None = None) -> User:
+def create_user(
+    username: str,
+    email: str,
+    password: str,
+    org_id: int,
+    store_id: int | None = None
+) -> User:
     """
     Create new user with bcrypt password hashing.
 
+    MULTI-TENANT: Users must belong to an organization (org_id required).
+    Username and email uniqueness is scoped to the organization.
+
     Password must meet strength requirements or PasswordValidationError will be raised.
-    Username and email must be unique or ValueError will be raised.
+    Username and email must be unique within the org or ValueError will be raised.
 
     WHY: User creation is the entry point for authentication.
     Must enforce password strength at creation time.
+
+    Args:
+        username: Unique username within the organization
+        email: Unique email within the organization
+        password: Password meeting strength requirements
+        org_id: Organization ID (required)
+        store_id: Store ID for store-level users (optional)
+
+    Returns:
+        Created User object
+
+    Raises:
+        ValueError: If org doesn't exist, user exists, or store doesn't belong to org
+        PasswordValidationError: If password doesn't meet requirements
     """
+    # Validate organization exists and is active
+    org = db.session.query(Organization).filter_by(id=org_id).first()
+    if not org:
+        raise ValueError("Organization not found")
+    if not org.is_active:
+        raise ValueError("Organization is not active")
+
+    # MULTI-TENANT: Check uniqueness within organization
     existing = db.session.query(User).filter(
+        User.org_id == org_id,
         db.or_(User.username == username, User.email == email)
     ).first()
 
     if existing:
-        raise ValueError("Username or email already exists")
+        raise ValueError("Username or email already exists in this organization")
+
+    # If store_id provided, verify it belongs to the same org
+    if store_id is not None:
+        from ..models import Store
+        store = db.session.query(Store).filter_by(id=store_id).first()
+        if not store:
+            raise ValueError("Store not found")
+        if store.org_id != org_id:
+            raise ValueError("Store does not belong to this organization")
 
     # Hash password with bcrypt (validates strength automatically)
     password_hash = hash_password(password)
 
     user = User(
+        org_id=org_id,
         username=username,
         email=email,
         password_hash=password_hash,
@@ -124,29 +170,48 @@ def create_user(username: str, email: str, password: str, store_id: int | None =
     return user
 
 
-def authenticate(username: str, password: str) -> User | None:
+def authenticate(username: str, password: str, org_id: int | None = None) -> User | None:
     """
     Authenticate user with username and password.
+
+    MULTI-TENANT: If org_id is provided, authentication is scoped to that org.
+    If org_id is None, searches across all orgs (for backwards compatibility
+    during migration, but should be avoided in production).
 
     Returns User if credentials valid, None otherwise.
     Updates last_login_at timestamp on successful authentication.
 
     WHY: Central authentication function. All login flows go through here.
     Uses timing-safe comparison via bcrypt.
+
+    Args:
+        username: Username or email
+        password: Password to verify
+        org_id: Organization ID to scope authentication (recommended)
+
+    Returns:
+        User object if credentials valid and org is active, None otherwise
     """
-    user = (
-        db.session.query(User)
-        .filter(
-            db.or_(User.username == username, User.email == username),
-            User.is_active.is_(True),
-        )
-        .first()
+    query = db.session.query(User).filter(
+        db.or_(User.username == username, User.email == username),
+        User.is_active.is_(True),
     )
+
+    # MULTI-TENANT: Scope to organization if provided
+    if org_id is not None:
+        query = query.filter(User.org_id == org_id)
+
+    user = query.first()
 
     if not user:
         return None
 
-    # Verify password (supports both bcrypt and legacy stub hashes)
+    # MULTI-TENANT: Verify organization is active
+    org = db.session.query(Organization).filter_by(id=user.org_id).first()
+    if not org or not org.is_active:
+        return None
+
+    # Verify password
     if verify_password(password, user.password_hash):
         user.last_login_at = utcnow()
         db.session.commit()

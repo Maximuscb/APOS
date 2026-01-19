@@ -1,12 +1,23 @@
 # backend/app/services/products_service.py
+"""
+Products Service with Multi-Tenant Support
+
+MULTI-TENANT: All product operations are tenant-scoped.
+- list_products requires org_id to filter stores
+- create_product requires validated store_id within tenant
+- update_product and delete_product validate store ownership
+"""
 from __future__ import annotations
+from flask import g
 from ..extensions import db
 from ..models import Product, Store
 from ..validation import ConflictError
 from ..services.ledger_service import append_ledger_event
+from ..services.tenant_service import require_store_in_org, get_org_store_ids, TenantAccessError
 from app.time_utils import utcnow
 
 PRODUCT_MUTABLE_FIELDS = {"sku", "name", "description", "price_cents", "is_active"}
+
 
 def apply_product_patch(p: Product, patch: dict) -> None:
     for k, v in patch.items():
@@ -14,32 +25,59 @@ def apply_product_patch(p: Product, patch: dict) -> None:
             continue
         setattr(p, k, v)
 
+
 def list_products(
+    org_id: int | None = None,
     store_id: int | None = None,
     page: int | None = None,
     per_page: int | None = None,
 ) -> dict:
     """
-    Real DB-backed product listing with optional pagination.
+    Tenant-scoped product listing with optional pagination.
+
+    MULTI-TENANT: Products are filtered to stores within the organization.
+    If store_id is provided, it must belong to the organization.
 
     Args:
-        store_id: Filter by store (uses first store if None)
+        org_id: Organization ID for tenant scoping (uses g.org_id if None)
+        store_id: Filter by specific store (must belong to org)
         page: Page number (1-indexed). If None, returns all items.
         per_page: Items per page (default 20, max 100)
 
     Returns:
         Dict with 'items', 'count', and pagination metadata if paginated.
+
+    Raises:
+        TenantAccessError: If store_id doesn't belong to org
     """
-    # Default store resolution: if no store_id provided, pick the first store.
-    if store_id is None:
+    # Get org_id from context if not provided
+    if org_id is None:
+        org_id = getattr(g, 'org_id', None)
+
+    if org_id is None:
+        # Fallback for backwards compatibility during migration
+        # In production, org_id should always be set
         default_store = db.session.query(Store).order_by(Store.id.asc()).first()
         if default_store is None:
             return {"items": [], "count": 0}
         store_id = default_store.id
+        store_ids = {store_id}
+    else:
+        # MULTI-TENANT: Get stores for this organization
+        store_ids = get_org_store_ids(org_id)
 
+        if not store_ids:
+            return {"items": [], "count": 0}
+
+        # If specific store requested, validate it belongs to org
+        if store_id is not None:
+            require_store_in_org(store_id, org_id)
+            store_ids = {store_id}
+
+    # Build query filtered to tenant's stores
     base_query = (
         db.session.query(Product)
-        .filter(Product.store_id == store_id)
+        .filter(Product.store_id.in_(store_ids))
         .order_by(Product.name.asc(), Product.id.asc())
     )
 
@@ -74,21 +112,52 @@ def list_products(
     }
 
 
-def create_product(*, patch: dict) -> dict:
+def create_product(*, patch: dict, org_id: int | None = None, store_id: int | None = None) -> dict:
     """
-    Create using a validated patch dict.
-    Expects patch includes at least sku and name (enforced by validation layer).
+    Create product using a validated patch dict.
+
+    MULTI-TENANT: Product is created in a store belonging to the organization.
+    If store_id is provided, it must belong to the organization.
+
+    Args:
+        patch: Product data (sku, name, etc.)
+        org_id: Organization ID (uses g.org_id if None)
+        store_id: Store ID to create product in (uses first org store if None)
+
+    Returns:
+        Created product dict
+
+    Raises:
+        TenantAccessError: If store_id doesn't belong to org
+        ConflictError: If SKU already exists in the store
     """
-    store = db.session.query(Store).order_by(Store.id.asc()).first()
-    if store is None:
-        store = Store(name="Default Store")
-        db.session.add(store)
-        db.session.commit()
+    # Get org_id from context if not provided
+    if org_id is None:
+        org_id = getattr(g, 'org_id', None)
+
+    # Determine which store to use
+    if store_id is not None:
+        if org_id is not None:
+            # Validate store belongs to org
+            store = require_store_in_org(store_id, org_id)
+        else:
+            store = db.session.query(Store).filter_by(id=store_id).first()
+            if not store:
+                raise ValueError("Store not found")
+    else:
+        # Use first store in org (or first store overall for backwards compat)
+        if org_id is not None:
+            store = db.session.query(Store).filter_by(org_id=org_id).order_by(Store.id.asc()).first()
+        else:
+            store = db.session.query(Store).order_by(Store.id.asc()).first()
+
+        if store is None:
+            raise ValueError("No store available. Create a store first.")
 
     # SKU uniqueness (store_id, sku)
     sku = patch.get("sku")
     if sku is None:
-        raise ValueError("sku is required")  # should not happen if validated
+        raise ValueError("sku is required")
 
     existing = (
         db.session.query(Product)
@@ -103,9 +172,6 @@ def create_product(*, patch: dict) -> dict:
 
     db.session.add(p)
     db.session.flush()  # ensure p.id exists before ledger append
-
-    from ..services.ledger_service import append_ledger_event
-    from app.time_utils import utcnow
 
     append_ledger_event(
         store_id=p.store_id,
@@ -131,18 +197,37 @@ def get_products_module_status() -> dict:
     "notes": "Product model exists; list endpoint can query DB (may be empty until seeded).",
     }
 
-def delete_product(*, product_id: int) -> bool:
+def delete_product(*, product_id: int, org_id: int | None = None) -> bool:
+    """
+    Soft-delete a product.
+
+    MULTI-TENANT: Validates product belongs to a store in the organization.
+
+    Args:
+        product_id: Product ID to delete
+        org_id: Organization ID (uses g.org_id if None)
+
+    Returns:
+        True if deleted, False if not found
+
+    Raises:
+        TenantAccessError: If product belongs to different org
+    """
+    # Get org_id from context if not provided
+    if org_id is None:
+        org_id = getattr(g, 'org_id', None)
+
     p = db.session.query(Product).filter(Product.id == product_id).first()
     if not p:
         return False
 
+    # MULTI-TENANT: Verify product's store belongs to org
+    if org_id is not None:
+        require_store_in_org(p.store_id, org_id)
+
     # Soft-delete only: preserve IDs and historical references.
     if p.is_active:
         p.is_active = False
-
-        # Append audit event in the same transaction.
-        from ..services.ledger_service import append_ledger_event
-        from app.time_utils import utcnow
 
         append_ledger_event(
             store_id=p.store_id,
@@ -157,10 +242,35 @@ def delete_product(*, product_id: int) -> bool:
     db.session.commit()
     return True
 
-def update_product(*, product_id: int, patch: dict) -> dict | None:
+def update_product(*, product_id: int, patch: dict, org_id: int | None = None) -> dict | None:
+    """
+    Update a product.
+
+    MULTI-TENANT: Validates product belongs to a store in the organization.
+
+    Args:
+        product_id: Product ID to update
+        patch: Fields to update
+        org_id: Organization ID (uses g.org_id if None)
+
+    Returns:
+        Updated product dict, or None if not found
+
+    Raises:
+        TenantAccessError: If product belongs to different org
+        ConflictError: If new SKU already exists in store
+    """
+    # Get org_id from context if not provided
+    if org_id is None:
+        org_id = getattr(g, 'org_id', None)
+
     p = db.session.query(Product).filter(Product.id == product_id).first()
     if not p:
         return None
+
+    # MULTI-TENANT: Verify product's store belongs to org
+    if org_id is not None:
+        require_store_in_org(p.store_id, org_id)
 
     # SKU uniqueness enforcement if changing SKU
     if "sku" in patch and patch["sku"] != p.sku:

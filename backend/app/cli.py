@@ -6,8 +6,8 @@
 # - Use: python -m flask <group> <command> [options]
 #
 # System bootstrap/repair:
-# - python -m flask system init
-#   Full idempotent bootstrap: creates default store, roles, permissions, and users.
+# - python -m flask system init [--org "Org Name"]
+#   Full idempotent bootstrap: creates default org, store, roles, permissions, and users.
 # - python -m flask system init-roles
 #   Create default roles only (admin, manager, cashier).
 # - python -m flask system init-permissions
@@ -15,10 +15,16 @@
 # - python -m flask system reset-db --yes
 #   DEV/TEST only: drop and recreate all tables (deletes all data).
 #
+# Organization management (MULTI-TENANT):
+# - python -m flask orgs list
+#   List all organizations.
+# - python -m flask orgs create --name "Acme Corp" --code "ACME"
+#   Create a new organization (tenant).
+#
 # User inspection/bootstrap:
-# - python -m flask users list
+# - python -m flask users list [--org-id 1]
 #   List all users with roles and active status.
-# - python -m flask users create --username admin --email admin@apos.local --password "Password123!" --role admin
+# - python -m flask users create --org-id 1 --username admin --email admin@apos.local --password "Password123!" --role admin
 #   Create a user (prompts if options are omitted).
 #
 # Permission inspection/repair:
@@ -47,7 +53,7 @@ import click
 from flask.cli import with_appcontext
 
 from .extensions import db
-from .models import Store, User, Role, UserRole, Permission, RolePermission
+from .models import Store, User, Role, UserRole, Permission, RolePermission, Organization
 from .services.auth_service import create_user, create_default_roles, assign_role, PasswordValidationError
 from .services import permission_service
 from .services import maintenance_service
@@ -59,47 +65,63 @@ def system_group():
 
 
 @system_group.command('init')
+@click.option('--org', 'org_name', default='Default Organization', help='Organization name')
+@click.option('--org-code', default='DEFAULT', help='Organization code')
 @with_appcontext
-def init_system():
+def init_system(org_name, org_code):
     """
-    Initialize complete APOS system: roles, default users, and default store.
+    Initialize complete APOS system: organization, roles, default users, and default store.
+
+    MULTI-TENANT: Creates a default organization as the tenant root.
+    All stores and users are scoped to this organization.
 
     Creates:
-    - Default store (if none exists)
+    - Default organization (if none exists)
+    - Default store within the organization
     - Roles: admin, manager, cashier
     - Users: admin/admin@apos.local, manager/manager@apos.local, cashier/cashier@apos.local
-    - All passwords default to: "password123"
+    - All passwords default to: "Password123!"
 
     SECURITY: Change passwords immediately in production!
     """
     click.echo("START Initializing APOS system...")
 
-    # 1. Ensure default store exists
-    store = db.session.query(Store).first()
+    # 1. Ensure default organization exists
+    org = db.session.query(Organization).first()
+    if not org:
+        org = Organization(name=org_name, code=org_code, is_active=True)
+        db.session.add(org)
+        db.session.commit()
+        click.echo(f"PASS Created default organization: {org.name} (ID: {org.id}, Code: {org.code})")
+    else:
+        click.echo(f"PASS Using existing organization: {org.name} (ID: {org.id})")
+
+    # 2. Ensure default store exists within the organization
+    store = db.session.query(Store).filter_by(org_id=org.id).first()
     if not store:
-        store = Store(name="Main Store")
+        store = Store(org_id=org.id, name="Main Store")
         db.session.add(store)
         db.session.commit()
-        click.echo(f"PASS Created default store: {store.name} (ID: {store.id})")
+        click.echo(f"PASS Created default store: {store.name} (ID: {store.id}, Org: {org.name})")
     else:
         click.echo(f"PASS Using existing store: {store.name} (ID: {store.id})")
 
-    # 2. Create roles
+    # 3. Create roles
     click.echo("\nLIST Creating roles...")
     create_default_roles()
     roles = db.session.query(Role).all()
     click.echo(f"PASS Roles created: {', '.join(r.name for r in roles)}")
 
-    # 2.5. Initialize permissions (Phase 7)
+    # 4. Initialize permissions
     click.echo("\nSECURITY Initializing permissions...")
     perm_count = permission_service.initialize_permissions()
     assignment_count = permission_service.assign_default_role_permissions()
     click.echo(f"PASS Created {perm_count} permissions, {assignment_count} role assignments")
 
-    # 3. Create default users
+    # 5. Create default users (within the organization)
     click.echo("\nUSERS Creating default users...")
 
-    # Default password meets Phase 6 requirements:
+    # Default password meets requirements:
     # - Minimum 8 characters
     # - Uppercase, lowercase, digit, special char
     default_password = "Password123!"
@@ -113,14 +135,23 @@ def init_system():
 
     for username, email, role_name, password in default_users:
         try:
-            # Check if user exists
-            existing = db.session.query(User).filter_by(username=username).first()
+            # Check if user exists in this org
+            existing = db.session.query(User).filter_by(
+                org_id=org.id,
+                username=username
+            ).first()
             if existing:
-                click.echo(f"WARN  User '{username}' already exists, skipping...")
+                click.echo(f"WARN  User '{username}' already exists in org, skipping...")
                 continue
 
-            # Create user (password will be hashed with bcrypt and validated)
-            user = create_user(username, email, password, store_id=store.id)
+            # Create user with org_id (password will be hashed with bcrypt and validated)
+            user = create_user(
+                username=username,
+                email=email,
+                password=password,
+                org_id=org.id,
+                store_id=store.id
+            )
 
             # Assign role
             assign_role(user.id, role_name)
@@ -135,6 +166,8 @@ def init_system():
     click.echo("\n" + "="*60)
     click.echo("DONE APOS System Initialized Successfully!")
     click.echo("="*60)
+    click.echo(f"\nOrganization: {org.name} (ID: {org.id})")
+    click.echo(f"Store: {store.name} (ID: {store.id})")
     click.echo("\nDefault Credentials (CHANGE IN PRODUCTION!):")
     click.echo("   admin     -> admin@apos.local     / Password123!")
     click.echo("   developer -> developer@apos.local / Password123!")
@@ -157,22 +190,106 @@ def init_roles():
     click.echo(f"PASS Created roles: {', '.join(r.name for r in roles)}")
 
 
+# =============================================================================
+# ORGANIZATION MANAGEMENT COMMANDS (MULTI-TENANT)
+# =============================================================================
+
+@click.group('orgs')
+def orgs_group():
+    """Organization (tenant) management commands."""
+
+
+@orgs_group.command('list')
+@with_appcontext
+def list_orgs():
+    """List all organizations."""
+    orgs = db.session.query(Organization).all()
+
+    if not orgs:
+        click.echo("No organizations found.")
+        return
+
+    click.echo("\n" + "="*80)
+    click.echo(f"{'ID':<5} {'Name':<30} {'Code':<15} {'Active':<8} {'Stores':<8} {'Users'}")
+    click.echo("="*80)
+
+    for org in orgs:
+        store_count = db.session.query(Store).filter_by(org_id=org.id).count()
+        user_count = db.session.query(User).filter_by(org_id=org.id).count()
+        active_str = "Yes" if org.is_active else "No"
+
+        click.echo(f"{org.id:<5} {org.name:<30} {org.code or '-':<15} {active_str:<8} {store_count:<8} {user_count}")
+
+    click.echo("="*80 + "\n")
+
+
+@orgs_group.command('create')
+@click.option('--name', required=True, help='Organization name')
+@click.option('--code', required=True, help='Short code (unique)')
+@with_appcontext
+def create_org_cli(name, code):
+    """Create a new organization (tenant)."""
+    existing = db.session.query(Organization).filter_by(code=code).first()
+    if existing:
+        click.echo(f"FAIL Organization with code '{code}' already exists")
+        return
+
+    org = Organization(name=name, code=code, is_active=True)
+    db.session.add(org)
+    db.session.commit()
+
+    click.echo(f"PASS Created organization: {org.name} (ID: {org.id}, Code: {org.code})")
+
+
+@orgs_group.command('add-store')
+@click.option('--org-id', type=int, required=True, help='Organization ID')
+@click.option('--name', required=True, help='Store name')
+@click.option('--code', help='Store code (unique within org)')
+@with_appcontext
+def add_store_to_org_cli(org_id, name, code):
+    """Add a store to an organization."""
+    org = db.session.query(Organization).filter_by(id=org_id).first()
+    if not org:
+        click.echo(f"FAIL Organization ID {org_id} not found")
+        return
+
+    # Check name uniqueness within org
+    existing = db.session.query(Store).filter_by(org_id=org_id, name=name).first()
+    if existing:
+        click.echo(f"FAIL Store '{name}' already exists in this organization")
+        return
+
+    store = Store(org_id=org_id, name=name, code=code)
+    db.session.add(store)
+    db.session.commit()
+
+    click.echo(f"PASS Created store: {store.name} (ID: {store.id}) in org '{org.name}'")
+
+
+# =============================================================================
+# USER MANAGEMENT COMMANDS
+# =============================================================================
+
 @click.group('users')
 def users_group():
     """User inspection and bootstrap commands."""
 
 
 @users_group.command('create')
+@click.option('--org-id', type=int, help='Organization ID (uses default if not specified)')
 @click.option('--username', prompt=True, help='Username')
 @click.option('--email', prompt=True, help='Email address')
 @click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='Password')
 @click.option('--role', type=click.Choice(['admin', 'manager', 'cashier']), prompt=True, help='Role')
 @with_appcontext
-def create_user_cli(username, email, password, role):
+def create_user_cli(org_id, username, email, password, role):
     """
     Create a new user interactively.
 
-    Phase 6: Password must meet strength requirements:
+    MULTI-TENANT: User is created within the specified organization.
+    If --org-id is not provided, uses the first (default) organization.
+
+    Password must meet strength requirements:
     - Minimum 8 characters
     - At least one uppercase letter
     - At least one lowercase letter
@@ -180,19 +297,38 @@ def create_user_cli(username, email, password, role):
     - At least one special character
     """
     try:
-        # Get default store
-        store = db.session.query(Store).first()
+        # Get organization
+        if org_id:
+            org = db.session.query(Organization).filter_by(id=org_id).first()
+            if not org:
+                click.echo(f"FAIL Organization ID {org_id} not found")
+                return
+        else:
+            org = db.session.query(Organization).first()
+            if not org:
+                click.echo("FAIL No organization found. Run 'python -m flask system init' first.")
+                return
+
+        # Get default store for this org
+        store = db.session.query(Store).filter_by(org_id=org.id).first()
         if not store:
-            click.echo("FAIL No store found. Run 'python -m flask system init' first.")
+            click.echo(f"FAIL No store found in organization '{org.name}'. Create a store first.")
             return
 
-        # Create user (password will be hashed with bcrypt and validated)
-        user = create_user(username, email, password, store_id=store.id)
+        # Create user with org_id (password will be hashed with bcrypt and validated)
+        user = create_user(
+            username=username,
+            email=email,
+            password=password,
+            org_id=org.id,
+            store_id=store.id
+        )
 
         # Assign role
         assign_role(user.id, role)
 
         click.echo(f"PASS Created user: {username} ({email}) with role '{role}'")
+        click.echo(f"     Organization: {org.name} (ID: {org.id})")
         click.echo("SECURITY Password securely hashed with bcrypt")
 
     except PasswordValidationError as e:
@@ -203,18 +339,24 @@ def create_user_cli(username, email, password, role):
 
 
 @users_group.command('list')
+@click.option('--org-id', type=int, help='Filter by organization ID')
 @with_appcontext
-def list_users():
+def list_users(org_id):
     """List all users with their roles."""
-    users = db.session.query(User).all()
+    query = db.session.query(User)
+
+    if org_id:
+        query = query.filter_by(org_id=org_id)
+
+    users = query.all()
 
     if not users:
         click.echo("No users found.")
         return
 
-    click.echo("\n" + "="*80)
-    click.echo(f"{'ID':<5} {'Username':<20} {'Email':<30} {'Active':<8} {'Roles'}")
-    click.echo("="*80)
+    click.echo("\n" + "="*100)
+    click.echo(f"{'ID':<5} {'Org':<5} {'Username':<20} {'Email':<30} {'Active':<8} {'Roles'}")
+    click.echo("="*100)
 
     for user in users:
         # Get user roles
@@ -228,9 +370,9 @@ def list_users():
         roles_str = ", ".join(role_names) if role_names else "none"
         active_str = "Yes" if user.is_active else "No"
 
-        click.echo(f"{user.id:<5} {user.username:<20} {user.email:<30} {active_str:<8} {roles_str}")
+        click.echo(f"{user.id:<5} {user.org_id:<5} {user.username:<20} {user.email:<30} {active_str:<8} {roles_str}")
 
-    click.echo("="*80 + "\n")
+    click.echo("="*100 + "\n")
 
 
 @system_group.command('reset-db')
@@ -597,6 +739,7 @@ def cleanup_security_events_cli(retention_days):
 def register_commands(app):
     """Register all CLI commands with Flask app."""
     app.cli.add_command(system_group)
+    app.cli.add_command(orgs_group)  # Multi-tenant organization management
     app.cli.add_command(users_group)
     app.cli.add_command(perms_group)
     app.cli.add_command(registers_group)

@@ -1,24 +1,3 @@
-"""
-Phase 7: Route Decorators for Authentication and Authorization
-
-WHY: Declarative permission enforcement on Flask routes.
-Decorators provide clean, readable way to protect endpoints.
-
-USAGE:
-    @auth_bp.post("/users")
-    @require_auth
-    @require_permission("CREATE_USER")
-    def create_user_route():
-        # user is now available in g.current_user
-        ...
-
-DESIGN:
-- @require_auth: Validates session token, sets g.current_user
-- @require_permission: Checks user has specific permission
-- Logs all permission checks to security_events
-- Returns standard JSON error responses
-"""
-
 from functools import wraps
 from flask import request, jsonify, g
 
@@ -28,14 +7,20 @@ from .services.permission_service import PermissionDeniedError
 
 def require_auth(f):
     """
-    Decorator: Require valid authentication token.
+    Require authentication and establish tenant context.
 
-    Expects Authorization header: Bearer <token>
-    Sets g.current_user to authenticated User object.
+    MULTI-TENANT: Sets the following Flask g attributes:
+    - g.current_user: The authenticated User object
+    - g.org_id: The organization ID (tenant context) - REQUIRED
+    - g.store_id: The user's store ID (may be None for org-level users)
+    - g.session_context: The full SessionContext object
 
-    Returns 401 if token missing, invalid, or expired.
-
-    WHY: Central authentication enforcement. All protected routes start here.
+    SECURITY: Returns 401 if:
+    - No Authorization header
+    - Invalid or expired token
+    - User account deactivated
+    - Organization deactivated
+    - Session missing org_id (should not happen with new sessions)
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -47,14 +32,35 @@ def require_auth(f):
 
         token = auth_header.split(" ", 1)[1]
 
-        # Validate token and get user
-        user = session_service.validate_session(token)
+        # Validate token and get session context (includes tenant info)
+        context = session_service.validate_session(token)
 
-        if not user:
+        if not context:
             return jsonify({"error": "Invalid or expired token"}), 401
 
-        # Store user in Flask g for access in route
-        g.current_user = user
+        # MULTI-TENANT: Enforce org_id is present
+        # This should always be true for new sessions, but is a critical invariant
+        if not context.org_id:
+            # Log this as a security event - should never happen
+            permission_service.log_security_event(
+                user_id=context.user.id if context.user else None,
+                event_type="TENANT_CONTEXT_MISSING",
+                success=False,
+                resource=request.path,
+                action=request.method,
+                reason="Session missing org_id - critical security invariant violated",
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+                org_id=None,
+                store_id=None
+            )
+            return jsonify({"error": "Invalid session: missing tenant context"}), 401
+
+        # Store user and tenant context in Flask g for access in routes
+        g.current_user = context.user
+        g.org_id = context.org_id
+        g.store_id = context.store_id
+        g.session_context = context
 
         return f(*args, **kwargs)
 
@@ -63,28 +69,15 @@ def require_auth(f):
 
 def require_permission(permission_code: str):
     """
-    Decorator factory: Require specific permission.
+    Require a specific permission.
 
-    Must be used AFTER @require_auth decorator.
-    Checks g.current_user has the specified permission.
-
-    Returns 403 if permission denied.
-    Logs all checks (granted and denied) to security_events.
-
-    WHY: Declarative RBAC enforcement. Permission requirements
-    are clear and visible at route definition.
-
-    Usage:
-        @require_auth
-        @require_permission("CREATE_SALE")
-        def create_sale():
-            ...
+    MULTI-TENANT: Security events include org_id and store_id for tenant-scoped auditing.
     """
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             # Ensure @require_auth was called first
-            if not hasattr(g, 'current_user'):
+            if not hasattr(g, 'current_user') or not hasattr(g, 'org_id'):
                 return jsonify({"error": "Authentication required"}), 401
 
             user = g.current_user
@@ -94,14 +87,16 @@ def require_permission(permission_code: str):
             user_agent = request.headers.get("User-Agent")
             resource = request.path
 
-            # Check permission (logs to security_events)
+            # Check permission (logs to security_events with tenant context)
             try:
                 permission_service.require_permission(
                     user_id=user.id,
                     permission_code=permission_code,
                     resource=resource,
                     ip_address=ip_address,
-                    user_agent=user_agent
+                    user_agent=user_agent,
+                    org_id=g.org_id,
+                    store_id=g.store_id
                 )
             except PermissionDeniedError as e:
                 return jsonify({
@@ -118,23 +113,14 @@ def require_permission(permission_code: str):
 
 def require_any_permission(*permission_codes):
     """
-    Decorator factory: Require ANY of the specified permissions.
+    Require any of the specified permissions.
 
-    User needs at least one of the permissions to proceed.
-    Useful for routes that can be accessed by multiple roles.
-
-    Returns 403 if none of the permissions are granted.
-
-    Usage:
-        @require_auth
-        @require_any_permission("APPROVE_DOCUMENTS", "SYSTEM_ADMIN")
-        def approve_document():
-            ...
+    MULTI-TENANT: Security events include org_id and store_id for tenant-scoped auditing.
     """
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            if not hasattr(g, 'current_user'):
+            if not hasattr(g, 'current_user') or not hasattr(g, 'org_id'):
                 return jsonify({"error": "Authentication required"}), 401
 
             user = g.current_user
@@ -146,7 +132,7 @@ def require_any_permission(*permission_codes):
             user_permissions = permission_service.get_user_permissions(user.id)
             has_any = any(code in user_permissions for code in permission_codes)
 
-            # Log the check
+            # Log the check with tenant context
             permission_service.log_security_event(
                 user_id=user.id,
                 event_type="PERMISSION_DENIED" if not has_any else "PERMISSION_GRANTED",
@@ -155,7 +141,9 @@ def require_any_permission(*permission_codes):
                 action=f"ANY_OF:{','.join(permission_codes)}",
                 reason=None if has_any else f"Missing any of: {', '.join(permission_codes)}",
                 ip_address=ip_address,
-                user_agent=user_agent
+                user_agent=user_agent,
+                org_id=g.org_id,
+                store_id=g.store_id
             )
 
             if not has_any:
@@ -173,23 +161,14 @@ def require_any_permission(*permission_codes):
 
 def require_all_permissions(*permission_codes):
     """
-    Decorator factory: Require ALL of the specified permissions.
+    Require all of the specified permissions.
 
-    User must have every specified permission to proceed.
-    Useful for highly privileged operations.
-
-    Returns 403 if any permission is missing.
-
-    Usage:
-        @require_auth
-        @require_all_permissions("VOID_SALE", "VIEW_AUDIT_LOG")
-        def void_sale_with_audit():
-            ...
+    MULTI-TENANT: Security events include org_id and store_id for tenant-scoped auditing.
     """
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            if not hasattr(g, 'current_user'):
+            if not hasattr(g, 'current_user') or not hasattr(g, 'org_id'):
                 return jsonify({"error": "Authentication required"}), 401
 
             user = g.current_user
@@ -202,7 +181,7 @@ def require_all_permissions(*permission_codes):
             has_all = all(code in user_permissions for code in permission_codes)
             missing = [code for code in permission_codes if code not in user_permissions]
 
-            # Log the check
+            # Log the check with tenant context
             permission_service.log_security_event(
                 user_id=user.id,
                 event_type="PERMISSION_DENIED" if not has_all else "PERMISSION_GRANTED",
@@ -211,7 +190,9 @@ def require_all_permissions(*permission_codes):
                 action=f"ALL_OF:{','.join(permission_codes)}",
                 reason=None if has_all else f"Missing: {', '.join(missing)}",
                 ip_address=ip_address,
-                user_agent=user_agent
+                user_agent=user_agent,
+                org_id=g.org_id,
+                store_id=g.store_id
             )
 
             if not has_all:

@@ -172,13 +172,15 @@ def logout_route():
 @auth_bp.post("/validate")
 def validate_route():
     """
-    Validate session token and return user info WITH permissions.
+    Validate session token and return user info WITH permissions and tenant context.
 
     Expects Authorization header: Bearer <token>
 
     Returns:
-        - user: User object with id, username, email, store_id
+        - user: User object with id, username, email, store_id, org_id
         - permissions: List of permission codes the user has (for RBAC filtering)
+        - org_id: Organization ID (tenant context)
+        - store_id: User's store ID (may be null for org-level users)
         - message: Status message
 
     WHY: Frontend can check if token is still valid and get permissions
@@ -191,18 +193,20 @@ def validate_route():
 
         token = auth_header.split(" ", 1)[1]
 
-        # Validate token and get user
-        user = session_service.validate_session(token)
+        # Validate token and get session context (includes tenant info)
+        context = session_service.validate_session(token)
 
-        if not user:
+        if not context:
             return jsonify({"error": "Invalid or expired token"}), 401
 
         # Get user's permissions for frontend RBAC
-        permissions = list(permission_service.get_user_permissions(user.id))
+        permissions = list(permission_service.get_user_permissions(context.user.id))
 
         return jsonify({
-            "user": user.to_dict(),
+            "user": context.user.to_dict(),
             "permissions": permissions,
+            "org_id": context.org_id,
+            "store_id": context.store_id,
             "message": "Token valid"
         }), 200
 

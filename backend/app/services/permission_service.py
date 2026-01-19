@@ -1,14 +1,17 @@
 """
-Phase 7: Permission Checking and Security Event Logging
+Permission Checking and Security Event Logging with Multi-Tenant Support
 
 WHY: Enforce role-based access control and create audit trail.
 Every permission check is logged for security monitoring.
 
+MULTI-TENANT: Security events include org_id and store_id for tenant isolation.
+All permission checks occur within the caller's tenant boundary.
+
 DESIGN PRINCIPLES:
 - Fail closed: Deny by default, require explicit permission grant
-- Log everything: All checks logged to security_events
+- Log everything: All checks logged to security_events with tenant context
 - Performance: Cache user permissions to avoid repeated queries
-- Store-scoped: Future support for multi-store permissions
+- Tenant isolation: All queries and logs scoped by org_id
 """
 
 from ..extensions import db
@@ -30,10 +33,15 @@ def log_security_event(
     action: str | None = None,
     reason: str | None = None,
     ip_address: str | None = None,
-    user_agent: str | None = None
+    user_agent: str | None = None,
+    org_id: int | None = None,
+    store_id: int | None = None
 ) -> SecurityEvent:
     """
-    Log security event to audit trail.
+    Log security event to audit trail with tenant context.
+
+    MULTI-TENANT: Includes org_id and store_id for tenant-scoped auditing.
+    Events can be filtered by tenant for security monitoring.
 
     WHY: Immutable audit log for compliance and security monitoring.
     Every permission check, login attempt, and security-relevant action logged.
@@ -45,9 +53,13 @@ def log_security_event(
     - LOGOUT
     - ROLE_ASSIGNED
     - USER_CREATED
+    - TENANT_CONTEXT_MISSING
+    - CROSS_TENANT_ACCESS_DENIED
     """
     event = SecurityEvent(
         user_id=user_id,
+        org_id=org_id,
+        store_id=store_id,
         event_type=event_type,
         resource=resource,
         action=action,
@@ -112,10 +124,15 @@ def require_permission(
     permission_code: str,
     resource: str | None = None,
     ip_address: str | None = None,
-    user_agent: str | None = None
+    user_agent: str | None = None,
+    org_id: int | None = None,
+    store_id: int | None = None
 ) -> None:
     """
     Require user to have permission, raise PermissionDeniedError if not.
+
+    MULTI-TENANT: Logs all permission checks with org_id and store_id
+    for tenant-scoped auditing.
 
     Logs all permission checks (granted and denied) to security_events.
 
@@ -123,11 +140,11 @@ def require_permission(
     Raises exception for easy integration with Flask error handlers.
 
     Usage:
-        require_permission(user.id, "CREATE_SALE", resource="/api/sales")
+        require_permission(user.id, "CREATE_SALE", resource="/api/sales", org_id=g.org_id)
     """
     has_permission = user_has_permission(user_id, permission_code)
 
-    # Log the permission check
+    # Log the permission check with tenant context
     log_security_event(
         user_id=user_id,
         event_type="PERMISSION_DENIED" if not has_permission else "PERMISSION_GRANTED",
@@ -136,7 +153,9 @@ def require_permission(
         action=permission_code,
         reason=None if has_permission else f"Missing permission: {permission_code}",
         ip_address=ip_address,
-        user_agent=user_agent
+        user_agent=user_agent,
+        org_id=org_id,
+        store_id=store_id
     )
 
     if not has_permission:
