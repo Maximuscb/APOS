@@ -26,8 +26,7 @@ PRODUCT_POLICY = ModelValidationPolicy(
     required_on_create={"sku", "name"},
 )
 
-# Maximum price: $10,000,000.00 (1 billion cents)
-MAX_PRICE_CENTS = 1_000_000_000
+# NOTE: MAX_PRICE_CENTS is now defined in validation.py and enforced by enforce_rules_product()
 
 products_bp = Blueprint("products", __name__, url_prefix="/api/products")
 
@@ -44,17 +43,19 @@ def products_status():
 @require_permission("VIEW_INVENTORY")
 def list_products():
     """
-    List all products.
+    List all products with optional pagination.
 
     Query params:
     - store_id: int (optional) - filter by store
+    - page: int (optional) - page number (1-indexed). If omitted, returns all items.
+    - per_page: int (optional) - items per page (default 20, max 100)
     """
-    store_id = request.args.get("store_id", type=int)  # optional
-    items = list_products_service(store_id=store_id)
-    return {
-        "items": items,
-        "count": len(items),
-    }
+    store_id = request.args.get("store_id", type=int)
+    page = request.args.get("page", type=int)
+    per_page = request.args.get("per_page", type=int)
+
+    result = list_products_service(store_id=store_id, page=page, per_page=per_page)
+    return result
 
 
 @products_bp.post("")
@@ -70,15 +71,7 @@ def create_product_route():
 
     try:
         patch = validate_payload(model=Product, payload=payload, policy=PRODUCT_POLICY, partial=False)
-        enforce_rules_product(patch)
-
-        # Validate max price
-        if "price_cents" in patch and patch["price_cents"] is not None:
-            if patch["price_cents"] > MAX_PRICE_CENTS:
-                return {"error": f"Price cannot exceed ${MAX_PRICE_CENTS / 100:,.2f}"}, 400
-            if patch["price_cents"] < 0:
-                return {"error": "Price cannot be negative"}, 400
-
+        enforce_rules_product(patch)  # Handles price validation including max check
     except ValidationError as e:
         return {"error": str(e)}, 400
 
@@ -123,15 +116,7 @@ def update_product_route(product_id: int):
 
     try:
         patch = validate_payload(model=Product, payload=payload, policy=PRODUCT_POLICY, partial=True)
-        enforce_rules_product(patch)
-
-        # Validate max price
-        if "price_cents" in patch and patch["price_cents"] is not None:
-            if patch["price_cents"] > MAX_PRICE_CENTS:
-                return {"error": f"Price cannot exceed ${MAX_PRICE_CENTS / 100:,.2f}"}, 400
-            if patch["price_cents"] < 0:
-                return {"error": "Price cannot be negative"}, 400
-
+        enforce_rules_product(patch)  # Handles price validation including max check
     except ValidationError as e:
         return {"error": str(e)}, 400
 

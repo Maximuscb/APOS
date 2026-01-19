@@ -63,6 +63,34 @@ export function ProductsTable({
     setSaving(false);
   }
 
+  // Maximum price in cents - must match backend MAX_PRICE_CENTS
+  const MAX_PRICE_CENTS = 999_999_999; // $9,999,999.99
+
+  function validatePrice(input: string): { valid: boolean; cents: number | null; error?: string } {
+    const s = input.trim();
+    if (!s) return { valid: true, cents: null };
+
+    // Reject scientific notation (e.g., "1e15", "1E10")
+    if (/[eE]/.test(s)) {
+      return { valid: false, cents: null, error: "Scientific notation is not allowed" };
+    }
+
+    const n = parseFloat(s);
+    if (!Number.isFinite(n)) {
+      return { valid: false, cents: null, error: "Price must be a valid number" };
+    }
+    if (n < 0) {
+      return { valid: false, cents: null, error: "Price cannot be negative" };
+    }
+
+    const cents = Math.round(n * 100);
+    if (cents > MAX_PRICE_CENTS) {
+      return { valid: false, cents: null, error: `Price cannot exceed $${(MAX_PRICE_CENTS / 100).toLocaleString()}` };
+    }
+
+    return { valid: true, cents };
+  }
+
   async function saveEdit(id: number) {
     setRowErr(null);
 
@@ -72,20 +100,15 @@ export function ProductsTable({
       return;
     }
 
-    const s = priceUsd.trim();
-    let cents: number | null = null;
-    if (s) {
-      const n = Number(s);
-      if (!Number.isFinite(n) || n < 0) {
-        setRowErr("Price must be a number (>= 0).");
-        return;
-      }
-      cents = Math.round(n * 100);
+    const priceResult = validatePrice(priceUsd);
+    if (!priceResult.valid) {
+      setRowErr(priceResult.error!);
+      return;
     }
 
     setSaving(true);
     try {
-      await onUpdate(id, { name: trimmed, price_cents: cents, is_active: isActive });
+      await onUpdate(id, { name: trimmed, price_cents: priceResult.cents, is_active: isActive });
       cancelEdit();
     } catch (e: any) {
       setRowErr(e?.message ?? "Failed to save.");

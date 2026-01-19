@@ -18,25 +18,41 @@ export function CreateProductForm({ onCreated }: { onCreated: () => void }) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  function dollarsToCents(input: string): number | null {
+  // Maximum price in cents - must match backend MAX_PRICE_CENTS
+  const MAX_PRICE_CENTS = 999_999_999; // $9,999,999.99
+
+  function validatePrice(input: string): { valid: boolean; cents: number | null; error?: string } {
     const s = input.trim();
-    if (!s) return null;
-    const n = Number(s);
-    if (!Number.isFinite(n)) return NaN as any;
-    return Math.round(n * 100);
+    if (!s) return { valid: true, cents: null };
+
+    // Reject scientific notation (e.g., "1e15", "1E10")
+    if (/[eE]/.test(s)) {
+      return { valid: false, cents: null, error: "Scientific notation is not allowed" };
+    }
+
+    const n = parseFloat(s);
+    if (!Number.isFinite(n)) {
+      return { valid: false, cents: null, error: "Price must be a valid number" };
+    }
+    if (n < 0) {
+      return { valid: false, cents: null, error: "Price cannot be negative" };
+    }
+
+    const cents = Math.round(n * 100);
+    if (cents > MAX_PRICE_CENTS) {
+      return { valid: false, cents: null, error: `Price cannot exceed $${(MAX_PRICE_CENTS / 100).toLocaleString()}` };
+    }
+
+    return { valid: true, cents };
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
 
-    const cents = dollarsToCents(priceDollars);
-    if (cents !== null && Number.isNaN(cents)) {
-      setErr("Price must be a number.");
-      return;
-    }
-    if (cents !== null && cents < 0) {
-      setErr("Price must be >= 0.");
+    const priceResult = validatePrice(priceDollars);
+    if (!priceResult.valid) {
+      setErr(priceResult.error!);
       return;
     }
 
@@ -45,7 +61,7 @@ export function CreateProductForm({ onCreated }: { onCreated: () => void }) {
       await apiPost<CreatedProduct>("/api/products", {
         sku,
         name,
-        price_cents: cents,
+        price_cents: priceResult.cents,
         is_active: isActive,
       });
       setSku("");

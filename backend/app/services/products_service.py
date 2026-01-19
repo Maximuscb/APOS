@@ -14,26 +14,64 @@ def apply_product_patch(p: Product, patch: dict) -> None:
             continue
         setattr(p, k, v)
 
-def list_products(store_id: int | None = None) -> list[dict]:
+def list_products(
+    store_id: int | None = None,
+    page: int | None = None,
+    per_page: int | None = None,
+) -> dict:
     """
-    Phase 2.1: Real DB-backed product listing.
-    Returns a list of simple DTO dicts for JSON responses.
+    Real DB-backed product listing with optional pagination.
+
+    Args:
+        store_id: Filter by store (uses first store if None)
+        page: Page number (1-indexed). If None, returns all items.
+        per_page: Items per page (default 20, max 100)
+
+    Returns:
+        Dict with 'items', 'count', and pagination metadata if paginated.
     """
-    # Default store resolution (Phase 2): if no store_id provided, pick the first store.
+    # Default store resolution: if no store_id provided, pick the first store.
     if store_id is None:
         default_store = db.session.query(Store).order_by(Store.id.asc()).first()
         if default_store is None:
-            return []
+            return {"items": [], "count": 0}
         store_id = default_store.id
 
-    products = (
+    base_query = (
         db.session.query(Product)
         .filter(Product.store_id == store_id)
         .order_by(Product.name.asc(), Product.id.asc())
-        .all()
     )
 
-    return [p.to_dict() for p in products]
+    # If no pagination requested, return all items
+    if page is None:
+        products = base_query.all()
+        return {
+            "items": [p.to_dict() for p in products],
+            "count": len(products),
+        }
+
+    # Pagination logic
+    per_page = min(per_page or 20, 100)  # Default 20, max 100
+    page = max(page, 1)  # Ensure page >= 1
+
+    total = base_query.count()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+
+    products = base_query.offset((page - 1) * per_page).limit(per_page).all()
+
+    return {
+        "items": [p.to_dict() for p in products],
+        "count": len(products),
+        "pagination": {
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_prev": page > 1,
+        },
+    }
 
 
 def create_product(*, patch: dict) -> dict:

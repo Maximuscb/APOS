@@ -9,6 +9,10 @@ from sqlalchemy import Boolean, Integer, String, Text, DateTime
 from sqlalchemy.orm import DeclarativeMeta
 
 
+# Maximum price: $9,999,999.99 (999,999,999 cents)
+# This prevents database overflow issues and nonsensical prices
+MAX_PRICE_CENTS = 999_999_999
+
 
 class ValidationError(ValueError):
     """400-level input problem."""
@@ -43,12 +47,31 @@ def _coerce_value(col, value: Any):
     if value is None:
         return None
 
-    # Integers
+    # Integers - strict validation to reject floats and scientific notation
     if isinstance(coltype, Integer):
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            raise ValidationError(f"{col.key} must be an integer")
+        # Already an int (but not bool which is a subclass of int)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        # String input - must be plain digits (with optional leading minus)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValidationError(f"{col.key} must be an integer")
+            # Reject scientific notation (e.g., "1e15", "1E10")
+            if 'e' in stripped.lower():
+                raise ValidationError(f"{col.key} must be a plain integer (scientific notation not allowed)")
+            # Reject decimal points (e.g., "12.5")
+            if '.' in stripped:
+                raise ValidationError(f"{col.key} must be an integer (no decimals)")
+            try:
+                return int(stripped)
+            except ValueError:
+                raise ValidationError(f"{col.key} must be an integer")
+        # Reject floats explicitly
+        if isinstance(value, float):
+            raise ValidationError(f"{col.key} must be an integer, not a decimal")
+        # Other types
+        raise ValidationError(f"{col.key} must be an integer")
 
     # Booleans
     if isinstance(coltype, Boolean):
@@ -152,8 +175,15 @@ def enforce_rules_product(patch: dict) -> None:
     Keep these small and centralized.
     """
     if "price_cents" in patch and patch["price_cents"] is not None:
-        if patch["price_cents"] < 0:
+        price = patch["price_cents"]
+        # Type check (should already be int from _coerce_value, but be defensive)
+        if not isinstance(price, int):
+            raise ValidationError("price_cents must be an integer")
+        # Range checks
+        if price < 0:
             raise ValidationError("price_cents must be >= 0")
+        if price > MAX_PRICE_CENTS:
+            raise ValidationError(f"price_cents cannot exceed {MAX_PRICE_CENTS} (${MAX_PRICE_CENTS / 100:,.2f})")
 
 def enforce_rules_inventory_receive(patch: dict) -> None:
     # RECEIVE requires qty > 0 and unit_cost_cents present and >= 0

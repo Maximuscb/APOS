@@ -15,6 +15,7 @@ import { RegistersPanel } from "./components/RegistersPanel";
 import { PaymentsPanel } from "./components/PaymentsPanel";
 import { AuditPanel } from "./components/AuditPanel";
 import { OperationsPanel } from "./components/OperationsPanel";
+import { AdminUsersPanel } from "./components/AdminUsersPanel";
 
 type Health = any;
 
@@ -34,15 +35,24 @@ type User = {
   store_id: number | null;
 };
 
-const navItems = [
+type NavItem = {
+  id: string;
+  label: string;
+  permissions?: string[]; // User needs at least ONE of these permissions to see the nav item
+};
+
+// Navigation items with permission requirements
+// If no permissions specified, item is always visible
+const navItems: NavItem[] = [
   { id: "overview", label: "Overview" },
-  { id: "inventory", label: "Inventory" },
-  { id: "sales", label: "Sales" },
-  { id: "registers", label: "Registers" },
-  { id: "payments", label: "Payments" },
-  { id: "operations", label: "Operations" },
-  { id: "audits", label: "Audits" },
-  { id: "auth", label: "Authentication" },
+  { id: "inventory", label: "Inventory", permissions: ["VIEW_INVENTORY", "RECEIVE_INVENTORY", "ADJUST_INVENTORY", "MANAGE_PRODUCTS"] },
+  { id: "sales", label: "Sales", permissions: ["CREATE_SALE", "POST_SALE", "VIEW_SALES_REPORTS"] },
+  { id: "registers", label: "Registers", permissions: ["MANAGE_REGISTER", "CREATE_REGISTER", "VIEW_REGISTERS"] },
+  { id: "payments", label: "Payments", permissions: ["REFUND_PAYMENT", "VIEW_SALES_REPORTS"] },
+  { id: "operations", label: "Operations", permissions: ["PROCESS_RETURN", "CREATE_TRANSFERS", "CREATE_COUNTS", "APPROVE_DOCUMENTS"] },
+  { id: "audits", label: "Audits", permissions: ["VIEW_AUDIT_LOG"] },
+  { id: "users", label: "Users", permissions: ["VIEW_USERS", "CREATE_USER", "EDIT_USER"] },
+  { id: "auth", label: "Authentication" }, // Always visible for login/logout
 ];
 
 const pageCopy: Record<string, { title: string; description: string }> = {
@@ -78,6 +88,10 @@ const pageCopy: Record<string, { title: string; description: string }> = {
     title: "Authentication",
     description: "Manage users, sessions, and permissions entry points.",
   },
+  users: {
+    title: "User Management",
+    description: "View users, assign roles, and manage account status.",
+  },
 };
 
 export default function App() {
@@ -92,6 +106,7 @@ export default function App() {
   const [authVersion, setAuthVersion] = useState(0);
   const [authStatus, setAuthStatus] = useState<"unknown" | "authenticated" | "guest">("unknown");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [userPermissions, setUserPermissions] = useState<string[]>([]);
   const [storeId, setStoreId] = useState(1);
 
   async function load() {
@@ -116,12 +131,14 @@ export default function App() {
     const token = getAuthToken();
     if (!token) {
       setCurrentUser(null);
+      setUserPermissions([]);
       setAuthStatus("guest");
       return;
     }
     try {
-      const result = await apiPost<{ user: User }>("/api/auth/validate", {});
+      const result = await apiPost<{ user: User; permissions?: string[] }>("/api/auth/validate", {});
       setCurrentUser(result.user);
+      setUserPermissions(result.permissions ?? []);
       setAuthStatus("authenticated");
       if (result.user?.store_id && result.user.store_id !== storeId) {
         setStoreId(result.user.store_id);
@@ -133,6 +150,7 @@ export default function App() {
       }
       clearAuthToken();
       setCurrentUser(null);
+      setUserPermissions([]);
       setAuthStatus("guest");
     }
   }
@@ -172,6 +190,7 @@ export default function App() {
 
   useEffect(() => {
     const hash = window.location.hash.replace("#", "");
+    // Check against all navItems (not visibleNavItems) to allow direct URL access
     if (hash && navItems.some((item) => item.id === hash)) {
       setActivePage(hash);
     }
@@ -180,6 +199,7 @@ export default function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace("#", "");
+      // Check against all navItems (not visibleNavItems) to allow direct URL access
       if (hash && navItems.some((item) => item.id === hash)) {
         setActivePage(hash);
       }
@@ -207,6 +227,22 @@ export default function App() {
     };
   }, [products]);
 
+  // Filter navigation items based on user permissions
+  const visibleNavItems = useMemo(() => {
+    return navItems.filter((item) => {
+      // Items without permission requirements are always visible
+      if (!item.permissions || item.permissions.length === 0) {
+        return true;
+      }
+      // For guests, only show items without permission requirements
+      if (authStatus !== "authenticated") {
+        return false;
+      }
+      // User needs at least ONE of the required permissions
+      return item.permissions.some((perm) => userPermissions.includes(perm));
+    });
+  }, [authStatus, userPermissions]);
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -215,7 +251,7 @@ export default function App() {
           <span className="brand__sub">Retail operations suite</span>
         </div>
         <nav className="nav">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -592,6 +628,12 @@ export default function App() {
         {activePage === "audits" && (
           <section className="content-grid fade-in delay-2">
             <AuditPanel authVersion={authVersion} isAuthed={authStatus === "authenticated"} />
+          </section>
+        )}
+
+        {activePage === "users" && (
+          <section className="content-grid fade-in delay-2">
+            <AdminUsersPanel storeId={storeId} isAuthed={authStatus === "authenticated"} />
           </section>
         )}
 

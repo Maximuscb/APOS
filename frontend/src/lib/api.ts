@@ -29,6 +29,36 @@ function buildHeaders(hasBody: boolean) {
   return headers;
 }
 
+/**
+ * Extract error message from response, with special handling for 403 errors.
+ */
+async function extractErrorMessage(res: Response): Promise<string> {
+  let msg = `HTTP ${res.status}`;
+
+  try {
+    const data = await res.json();
+    if (data?.error) {
+      msg = data.error;
+    }
+  } catch {
+    // JSON parsing failed, use default message
+  }
+
+  // Provide user-friendly messages for common HTTP errors
+  if (res.status === 403) {
+    // Improve 403 UX - make it clear this is a permission issue
+    if (!msg.toLowerCase().includes("permission") && !msg.toLowerCase().includes("forbidden")) {
+      msg = `Forbidden: ${msg}. You may not have permission for this action.`;
+    }
+  } else if (res.status === 401) {
+    if (!msg.toLowerCase().includes("auth") && !msg.toLowerCase().includes("token")) {
+      msg = `Unauthorized: ${msg}. Please sign in again.`;
+    }
+  }
+
+  return msg;
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
   let res: Response;
   try {
@@ -37,11 +67,7 @@ export async function apiGet<T>(path: string): Promise<T> {
     throw new Error("Network error: unable to reach API.");
   }
   if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try {
-      const data = await res.json();
-      if (data?.error) msg = data.error;
-    } catch {}
+    const msg = await extractErrorMessage(res);
     throw new Error(msg);
   }
   return (await res.json()) as T;
@@ -59,11 +85,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     throw new Error("Network error: unable to reach API.");
   }
   if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try {
-      const data = await res.json();
-      if (data?.error) msg = data.error;
-    } catch {}
+    const msg = await extractErrorMessage(res);
     throw new Error(msg);
   }
   return (await res.json()) as T;
@@ -77,11 +99,7 @@ export async function apiDelete(path: string): Promise<void> {
     throw new Error("Network error: unable to reach API.");
   }
   if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try {
-      const data = await res.json();
-      if (data?.error) msg = data.error;
-    } catch {}
+    const msg = await extractErrorMessage(res);
     throw new Error(msg);
   }
 }
@@ -98,11 +116,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
     throw new Error("Network error: unable to reach API.");
   }
   if (!res.ok) {
-    let msg = `HTTP ${res.status}`;
-    try {
-      const data = await res.json();
-      if (data?.error) msg = data.error;
-    } catch {}
+    const msg = await extractErrorMessage(res);
     throw new Error(msg);
   }
   return (await res.json()) as T;

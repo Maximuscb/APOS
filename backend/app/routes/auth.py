@@ -14,6 +14,7 @@ from flask import Blueprint, request, jsonify, current_app
 from ..services import auth_service
 from ..services import session_service
 from ..services import login_throttle_service
+from ..services import permission_service
 from ..services.auth_service import PasswordValidationError
 
 
@@ -23,34 +24,15 @@ auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 @auth_bp.post("/register")
 def register_route():
     """
-    Create new user account with secure password hashing.
+    Self-registration is disabled for security.
 
-    Password must meet strength requirements or 400 error returned.
+    Users can only be created by administrators via:
+    - POST /api/admin/users (requires CREATE_USER permission)
+    - CLI: flask create-user
     """
-    try:
-        data = request.get_json()
-        username = data.get("username")
-        email = data.get("email")
-        password = data.get("password")
-        store_id = data.get("store_id")
-
-        if not all([username, email, password]):
-            return jsonify({"error": "username, email, and password required"}), 400
-
-        user = auth_service.create_user(username, email, password, store_id)
-
-        return jsonify({
-            "user": user.to_dict(),
-            "message": "User created successfully"
-        }), 201
-
-    except PasswordValidationError as e:
-        return jsonify({"error": str(e)}), 400
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception:
-        current_app.logger.exception("Failed to register user")
-        return jsonify({"error": "Internal server error"}), 500
+    return jsonify({
+        "error": "Self-registration is disabled. Contact an administrator to create an account."
+    }), 403
 
 
 @auth_bp.post("/login")
@@ -190,11 +172,17 @@ def logout_route():
 @auth_bp.post("/validate")
 def validate_route():
     """
-    Validate session token and return user info.
+    Validate session token and return user info WITH permissions.
 
     Expects Authorization header: Bearer <token>
 
-    WHY: Frontend can check if token is still valid without making other API calls.
+    Returns:
+        - user: User object with id, username, email, store_id
+        - permissions: List of permission codes the user has (for RBAC filtering)
+        - message: Status message
+
+    WHY: Frontend can check if token is still valid and get permissions
+    for UI filtering (hiding nav items, buttons, etc.)
     """
     try:
         auth_header = request.headers.get("Authorization")
@@ -209,8 +197,12 @@ def validate_route():
         if not user:
             return jsonify({"error": "Invalid or expired token"}), 401
 
+        # Get user's permissions for frontend RBAC
+        permissions = list(permission_service.get_user_permissions(user.id))
+
         return jsonify({
             "user": user.to_dict(),
+            "permissions": permissions,
             "message": "Token valid"
         }), 200
 
@@ -219,34 +211,10 @@ def validate_route():
         return jsonify({"error": "Internal server error"}), 500
 
 
-@auth_bp.post("/roles/init")
-def init_roles_route():
-    """Initialize default roles."""
-    try:
-        auth_service.create_default_roles()
-        return jsonify({"message": "Default roles created"}), 200
+# NOTE: /roles/init endpoint REMOVED for security
+# Use CLI command: flask init-roles
+# See backend/app/cli.py for role initialization
 
-    except Exception:
-        current_app.logger.exception("Failed to init roles")
-        return jsonify({"error": "Internal server error"}), 500
-
-
-@auth_bp.post("/users/<int:user_id>/roles")
-def assign_role_route(user_id: int):
-    """Assign role to user."""
-    try:
-        data = request.get_json()
-        role_name = data.get("role_name")
-
-        if not role_name:
-            return jsonify({"error": "role_name required"}), 400
-
-        user_role = auth_service.assign_role(user_id, role_name)
-
-        return jsonify({"user_role": user_role.to_dict()}), 201
-
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    except Exception:
-        current_app.logger.exception("Failed to assign role")
-        return jsonify({"error": "Internal server error"}), 500
+# NOTE: /users/<id>/roles endpoint REMOVED for security
+# Use admin endpoint: POST /api/admin/users/<id>/roles (requires ASSIGN_ROLES permission)
+# See backend/app/routes/admin.py

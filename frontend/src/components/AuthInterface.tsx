@@ -16,9 +16,8 @@ export function AuthInterface({
   onAuthChange?: () => void;
   storeId?: number;
 }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
+  // Note: Registration is now admin-only via the Users page or CLI
   const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(() => getAuthToken());
@@ -44,25 +43,7 @@ export function AuthInterface({
     };
   }, [token, currentUser]);
 
-  async function handleRegister() {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await apiPost<{ user: User }>("/api/auth/register", {
-        username,
-        email,
-        password,
-        store_id: storeId,
-      });
-      alert("User registered successfully!");
-      setMode("login");
-      setPassword("");
-    } catch (e: any) {
-      setError(e?.message ?? "Registration failed");
-    } finally {
-      setLoading(false);
-    }
-  }
+  // Note: Registration is now admin-only - users are created via the Users page or CLI
 
   async function handleLogin() {
     setLoading(true);
@@ -84,14 +65,7 @@ export function AuthInterface({
     }
   }
 
-  async function initRoles() {
-    try {
-      await apiPost("/api/auth/roles/init", {});
-      alert("Default roles initialized!");
-    } catch (e: any) {
-      setError(e?.message ?? "Failed to init roles");
-    }
-  }
+  // Note: Role initialization is now CLI-only - use `flask init-roles` or `flask init-system`
 
   async function handleLogout() {
     setLoading(true);
@@ -129,27 +103,9 @@ export function AuthInterface({
 
   return (
     <div className="pos-card">
-      <h3>Authentication</h3>
+      <h3>Sign In</h3>
 
       {error && <div className="alert">{error}</div>}
-
-      <div className="pos-tabs">
-        <button
-          onClick={() => setMode("login")}
-          className={`pos-tab ${mode === "login" ? "pos-tab--active" : ""}`}
-        >
-          Login
-        </button>
-        <button
-          onClick={() => setMode("register")}
-          className={`pos-tab ${mode === "register" ? "pos-tab--active" : ""}`}
-        >
-          Register
-        </button>
-        <button className="btn btn--ghost pos-tabs__action" onClick={initRoles}>
-          Init roles
-        </button>
-      </div>
 
       <div className="pos-form">
         <input
@@ -159,31 +115,26 @@ export function AuthInterface({
           value={username}
           onChange={(e) => setUsername(e.target.value)}
         />
-        {mode === "register" && (
-          <input
-            className="input"
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        )}
         <input
           className="input"
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (mode === "login" ? handleLogin() : handleRegister())}
+          onKeyDown={(e) => e.key === "Enter" && handleLogin()}
         />
         <button
           className="btn btn--primary"
-          onClick={mode === "login" ? handleLogin : handleRegister}
+          onClick={handleLogin}
           disabled={loading}
         >
-          {loading ? "Working..." : mode === "login" ? "Login" : "Register"}
+          {loading ? "Signing in..." : "Sign In"}
         </button>
       </div>
+
+      <p className="muted" style={{ marginTop: 12, fontSize: 12 }}>
+        Need an account? Contact an administrator.
+      </p>
     </div>
   );
 }
