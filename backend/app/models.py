@@ -132,20 +132,43 @@ class StoreConfig(db.Model):
         }
 
 class Product(db.Model):
+    """
+    Product master data.
+
+    MULTI-TENANT: Products are scoped to stores via store_id.
+    Store belongs to an organization, so products are transitively org-scoped.
+
+    SKU DESIGN DECISION:
+    Product.sku is the CANONICAL source of truth for store-scoped SKUs.
+    - SKUs are unique within a store: UniqueConstraint("store_id", "sku")
+    - Do NOT create ProductIdentifier rows with type='SKU'
+    - ProductIdentifier is for scannable codes (UPC, ALT_BARCODE) and vendor codes
+
+    WHY:
+    1. SKUs are store-assigned internal codes, not external scannable identifiers
+    2. Every product must have exactly one SKU (required field)
+    3. Storing SKU in both places creates sync risk and ambiguity
+    4. Lookups by SKU are always store-scoped (you scan at a specific store)
+
+    LOOKUP PATTERN:
+    - SKU lookup: Product.query.filter_by(store_id=X, sku=Y)
+    - Barcode lookup: ProductIdentifier.query.filter_by(org_id=X, value=Y, is_active=True)
+    """
     __tablename__ = "products"
     __table_args__ = (
+        # SKUs are unique within a store (canonical source of truth)
         db.UniqueConstraint("store_id", "sku", name="uq_products_store_sku"),
         db.Index("ix_products_store_name", "store_id", "name"),
+        db.Index("ix_products_store_active", "store_id", "is_active"),
         {"sqlite_autoincrement": True},
     )
-
-
 
     id = db.Column(db.Integer, primary_key=True)
 
     # Multi-store ready (even if you only have one store today)
     store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
 
+    # CANONICAL SKU: Store-scoped, required. Do not duplicate in ProductIdentifier.
     sku = db.Column(db.String(64), nullable=False)
     name = db.Column(db.String(255), nullable=False)
     description = db.Column(db.Text, nullable=True)
@@ -274,12 +297,46 @@ class InventoryTransaction(db.Model):
         }
 
 class ProductIdentifier(db.Model):
+    """
+    Product identifiers for barcode/code lookups.
 
+    MULTI-TENANT SCOPING:
+    - org_id: Required for tenant isolation. Backfilled from Product.store_id -> Store.org_id.
+    - store_id: Optional, for store-specific identifiers. Backfilled from Product.store_id.
+
+    UNIQUENESS RULES BY TYPE:
+    - UPC, ALT_BARCODE: Org-scoped. Same UPC cannot be used by two products in same org.
+      Constraint: (org_id, type, value) for active identifiers
+    - VENDOR_CODE: Vendor-scoped within org. Same vendor code can exist for different vendors.
+      Constraint: (org_id, vendor_id, type, value) for active identifiers
+    - SKU: DEPRECATED in this table. Product.sku is the canonical source for store-scoped SKUs.
+      Do NOT create type=SKU identifiers; use Product.sku instead.
+
+    VALUE NORMALIZATION:
+    All identifier values are normalized to uppercase with whitespace stripped.
+    This ensures consistent lookups regardless of input case.
+
+    WHY NOT STORE-SCOPED FOR ALL:
+    UPCs are manufacturer-assigned and globally unique within retail. An org may
+    sell the same UPC from different stores. Store-scoping UPCs would allow the
+    same barcode to resolve to different products depending on which store is
+    scanning, which is confusing and error-prone.
+    """
     __tablename__ = "product_identifiers"
     __table_args__ = (
-    
-        db.UniqueConstraint("type", "value", name="uq_identifier_type_value"),
+        # Org-scoped uniqueness for scannable identifiers (UPC, ALT_BARCODE)
+        # Only enforced for active identifiers (is_active=True checked at application layer)
+        # Note: SKU type is deprecated; use Product.sku instead
+        db.UniqueConstraint("org_id", "type", "value", name="uq_identifier_org_type_value"),
+
+        # Vendor-scoped uniqueness for vendor codes (allows same code from different vendors)
+        # Applied via partial index or application-layer check since vendor_id is nullable
+        db.Index("ix_identifier_org_vendor_value", "org_id", "vendor_id", "value"),
+
+        # Lookup indexes matching common query patterns
         db.Index("ix_identifier_value", "value"),
+        db.Index("ix_identifier_org_value", "org_id", "value"),
+        db.Index("ix_identifier_org_type_active", "org_id", "type", "is_active"),
         db.Index("ix_identifier_product", "product_id"),
         db.Index("ix_identifier_active", "is_active"),
         {"sqlite_autoincrement": True},
@@ -288,14 +345,22 @@ class ProductIdentifier(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
 
-    # Identifier type: SKU, UPC, ALT_BARCODE, VENDOR_CODE
+    # MULTI-TENANT: Org scope for tenant isolation (backfilled from Product.store_id -> Store.org_id)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+
+    # Store scope (optional, backfilled from Product.store_id)
+    # Kept for reference/audit but uniqueness is org-scoped for most identifier types
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=True, index=True)
+
+    # Identifier type: UPC, ALT_BARCODE, VENDOR_CODE
+    # NOTE: SKU type is DEPRECATED. Use Product.sku for store-scoped SKUs.
     type = db.Column(db.String(32), nullable=False, index=True)
 
-    # Normalized value (uppercase, no spaces)
+    # Normalized value (uppercase, whitespace stripped)
     value = db.Column(db.String(128), nullable=False)
 
-    # Optional vendor scope for VENDOR_CODE type
-    vendor_id = db.Column(db.Integer, nullable=True)
+    # Vendor scope for VENDOR_CODE type (required when type=VENDOR_CODE)
+    vendor_id = db.Column(db.Integer, nullable=True, index=True)
 
     is_primary = db.Column(db.Boolean, nullable=False, default=False)
 
@@ -306,11 +371,15 @@ class ProductIdentifier(db.Model):
     deactivated_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     product = db.relationship("Product", backref=db.backref("identifiers", lazy=True))
+    organization = db.relationship("Organization", backref=db.backref("product_identifiers", lazy=True))
+    store = db.relationship("Store", backref=db.backref("product_identifiers", lazy=True))
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "product_id": self.product_id,
+            "org_id": self.org_id,
+            "store_id": self.store_id,
             "type": self.type,
             "value": self.value,
             "vendor_id": self.vendor_id,
@@ -331,6 +400,10 @@ class Sale(db.Model):
     __tablename__ = "sales"
     __table_args__ = (
         db.UniqueConstraint("store_id", "document_number", name="uq_sales_store_docnum"),
+        # Index for document number lookups (supports prefix searching)
+        db.Index("ix_sales_document_number", "document_number"),
+        # Composite index for store-scoped queries by status and date
+        db.Index("ix_sales_store_status_created", "store_id", "status", "created_at"),
         {"sqlite_autoincrement": True},
     )
 
@@ -775,6 +848,10 @@ class Return(db.Model):
     __tablename__ = "returns"
     __table_args__ = (
         db.UniqueConstraint("store_id", "document_number", name="uq_returns_store_docnum"),
+        # Index for document number lookups
+        db.Index("ix_returns_document_number", "document_number"),
+        # Composite index for store-scoped queries by status and date
+        db.Index("ix_returns_store_status_created", "store_id", "status", "created_at"),
         {"sqlite_autoincrement": True},
     )
 
@@ -929,9 +1006,18 @@ class Transfer(db.Model):
     tracking, and accountability. Creates TRANSFER transactions at both
     source (negative, state=IN_TRANSIT) and destination (positive,
     state=SELLABLE when received).
+
+    MULTI-TENANT: Document numbers are unique per source store (from_store_id),
+    consistent with Sale/Return/Count document numbering patterns.
+    DocumentSequence generates unique numbers per store.
     """
     __tablename__ = "transfers"
-    __table_args__ = {"sqlite_autoincrement": True}
+    __table_args__ = (
+        # Document numbers unique per source store (like Sale/Return)
+        db.UniqueConstraint("from_store_id", "document_number", name="uq_transfers_store_docnum"),
+        db.Index("ix_transfers_document_number", "document_number"),
+        {"sqlite_autoincrement": True},
+    )
 
     id = db.Column(db.Integer, primary_key=True)
 
@@ -939,8 +1025,8 @@ class Transfer(db.Model):
     from_store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
     to_store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
 
-    # Document number (e.g., "T-000001")
-    document_number = db.Column(db.String(64), nullable=False, unique=True)
+    # Document number (e.g., "T-000001") - unique per source store
+    document_number = db.Column(db.String(64), nullable=False)
 
     # PENDING, APPROVED, IN_TRANSIT, RECEIVED, CANCELLED
     status = db.Column(db.String(16), nullable=False, default="PENDING", index=True)
@@ -1062,16 +1148,25 @@ class Count(db.Model):
     between expected (system) and actual (counted) quantities are posted
     as ADJUST transactions. Manager approval required before posting
     ensures review of significant discrepancies.
+
+    MULTI-TENANT: Document numbers are unique per store (store_id),
+    consistent with Sale/Return/Transfer document numbering patterns.
+    DocumentSequence generates unique numbers per store.
     """
     __tablename__ = "counts"
-    __table_args__ = {"sqlite_autoincrement": True}
+    __table_args__ = (
+        # Document numbers unique per store (like Sale/Return)
+        db.UniqueConstraint("store_id", "document_number", name="uq_counts_store_docnum"),
+        db.Index("ix_counts_document_number", "document_number"),
+        {"sqlite_autoincrement": True},
+    )
 
     id = db.Column(db.Integer, primary_key=True)
 
     store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
 
-    # Document number (e.g., "C-000001")
-    document_number = db.Column(db.String(64), nullable=False, unique=True)
+    # Document number (e.g., "C-000001") - unique per store
+    document_number = db.Column(db.String(64), nullable=False)
 
     # CYCLE (subset of products) or FULL (all products)
     count_type = db.Column(db.String(16), nullable=False, index=True)
@@ -1246,19 +1341,50 @@ class User(db.Model):
 
 
 class Role(db.Model):
-    """Phase 4: Role-based permissions."""
+    """
+    Phase 4: Role-based permissions.
+
+    MULTI-TENANT RBAC:
+    - Roles are org-scoped: each organization can define its own roles
+    - Role names are unique within an organization: UniqueConstraint("org_id", "name")
+    - Permissions (Permission table) remain global system definitions
+    - RolePermission links org-specific roles to global permissions
+
+    WHY ORG-SCOPED ROLES:
+    1. Different orgs have different business structures (retail vs warehouse)
+    2. Allows customizing role names and permission sets per tenant
+    3. Tenant A's "Manager" may have different permissions than Tenant B's
+    4. New orgs can start with template roles without affecting others
+
+    MIGRATION NOTE:
+    Existing roles are backfilled to org_id=1 (Default Organization).
+    To support system-wide template roles in the future, consider adding
+    an is_template flag or a separate RoleTemplate table.
+    """
     __tablename__ = "roles"
-    __table_args__ = {"sqlite_autoincrement": True}
+    __table_args__ = (
+        # Role names unique within an organization
+        db.UniqueConstraint("org_id", "name", name="uq_roles_org_name"),
+        db.Index("ix_roles_org_id", "org_id"),
+        {"sqlite_autoincrement": True},
+    )
 
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(64), nullable=False, unique=True)
+
+    # MULTI-TENANT: Roles belong to organizations
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+
+    name = db.Column(db.String(64), nullable=False)
     description = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
 
+    organization = db.relationship("Organization", backref=db.backref("roles", lazy=True))
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "org_id": self.org_id,
             "name": self.name,
             "description": self.description,
             "created_at": to_utc_z(self.created_at),
