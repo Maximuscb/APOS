@@ -1,14 +1,47 @@
 # backend/app/cli.py
-"""
-CLI commands for APOS initialization and maintenance.
-
-Phase 6: Updated for bcrypt password hashing and validation.
-
-Usage:
-    flask init-system     - Initialize everything (roles + users + store)
-    flask init-roles      - Create default roles only
-    flask create-user     - Interactive user creation
-"""
+# Commands Legend (run from the backend directory):
+# Prereqs:
+# - Activate your virtualenv.
+# - Set FLASK_APP to wsgi.py (PowerShell: $env:FLASK_APP="wsgi.py").
+# - Use: python -m flask <group> <command> [options]
+#
+# System bootstrap/repair:
+# - python -m flask system init
+#   Full idempotent bootstrap: creates default store, roles, permissions, and users.
+# - python -m flask system init-roles
+#   Create default roles only (admin, manager, cashier).
+# - python -m flask system init-permissions
+#   Initialize permissions and assign defaults to roles.
+# - python -m flask system reset-db --yes
+#   DEV/TEST only: drop and recreate all tables (deletes all data).
+#
+# User inspection/bootstrap:
+# - python -m flask users list
+#   List all users with roles and active status.
+# - python -m flask users create --username admin --email admin@apos.local --password "Password123!" --role admin
+#   Create a user (prompts if options are omitted).
+#
+# Permission inspection/repair:
+# - python -m flask perms list --category SALES
+#   List permissions (optionally filtered by role or category).
+# - python -m flask perms check admin SYSTEM_ADMIN
+#   Check whether a user has a permission.
+# - python -m flask perms grant cashier VOID_SALE
+#   Grant a permission to a role.
+# - python -m flask perms revoke cashier VOID_SALE
+#   Revoke a permission from a role.
+#
+# Register inspection/bootstrap:
+# - python -m flask registers list --store-id 1
+#   List registers (use --all to include inactive).
+# - python -m flask registers create --store-id 1 --number "REG-01" --name "Front Counter 1" --location "Main Floor"
+#   Create a new POS register.
+# - python -m flask registers sessions --status OPEN --limit 20
+#   List recent register sessions with optional filters.
+#
+# Maintenance:
+# - python -m flask maintenance cleanup-security-events --retention-days 90
+#   Delete security events older than the retention window.
 
 import click
 from flask.cli import with_appcontext
@@ -18,10 +51,14 @@ from .models import Store, User, Role, UserRole, Permission, RolePermission
 from .services.auth_service import create_user, create_default_roles, assign_role, PasswordValidationError
 from .services import permission_service
 from .services import maintenance_service
-from .permissions import PERMISSION_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS
 
 
-@click.command('init-system')
+@click.group('system')
+def system_group():
+    """System bootstrap and repair commands."""
+
+
+@system_group.command('init')
 @with_appcontext
 def init_system():
     """
@@ -110,7 +147,7 @@ def init_system():
     click.echo("")
 
 
-@click.command('init-roles')
+@system_group.command('init-roles')
 @with_appcontext
 def init_roles():
     """Create default roles (admin, manager, cashier)."""
@@ -120,7 +157,12 @@ def init_roles():
     click.echo(f"PASS Created roles: {', '.join(r.name for r in roles)}")
 
 
-@click.command('create-user')
+@click.group('users')
+def users_group():
+    """User inspection and bootstrap commands."""
+
+
+@users_group.command('create')
 @click.option('--username', prompt=True, help='Username')
 @click.option('--email', prompt=True, help='Email address')
 @click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='Password')
@@ -141,7 +183,7 @@ def create_user_cli(username, email, password, role):
         # Get default store
         store = db.session.query(Store).first()
         if not store:
-            click.echo("FAIL No store found. Run 'flask init-system' first.")
+            click.echo("FAIL No store found. Run 'python -m flask system init' first.")
             return
 
         # Create user (password will be hashed with bcrypt and validated)
@@ -160,7 +202,7 @@ def create_user_cli(username, email, password, role):
         click.echo(f"FAIL Failed to create user: {str(e)}")
 
 
-@click.command('list-users')
+@users_group.command('list')
 @with_appcontext
 def list_users():
     """List all users with their roles."""
@@ -191,7 +233,7 @@ def list_users():
     click.echo("="*80 + "\n")
 
 
-@click.command('reset-db')
+@system_group.command('reset-db')
 @click.option('--yes', is_flag=True, help='Skip confirmation')
 @with_appcontext
 def reset_db(yes):
@@ -209,14 +251,14 @@ def reset_db(yes):
     click.echo("BUILD  Creating all tables...")
     db.create_all()
 
-    click.echo("PASS Database reset complete. Run 'flask init-system' to initialize.")
+    click.echo("PASS Database reset complete. Run 'python -m flask system init' to initialize.")
 
 
 # =============================================================================
 # PHASE 7: PERMISSION MANAGEMENT COMMANDS
 # =============================================================================
 
-@click.command('init-permissions')
+@system_group.command('init-permissions')
 @with_appcontext
 def init_permissions():
     """
@@ -257,7 +299,12 @@ def init_permissions():
     click.echo("")
 
 
-@click.command('list-permissions')
+@click.group('perms')
+def perms_group():
+    """Permission inspection and repair commands."""
+
+
+@perms_group.command('list')
 @click.option('--role', help='Filter by role name')
 @click.option('--category', help='Filter by category')
 @with_appcontext
@@ -324,7 +371,7 @@ def list_permissions_cli(role, category):
         click.echo(f"\n Total: {len(perms)} permissions\n")
 
 
-@click.command('grant-permission')
+@perms_group.command('grant')
 @click.argument('role_name')
 @click.argument('permission_code')
 @with_appcontext
@@ -337,7 +384,7 @@ def grant_permission_cli(role_name, permission_code):
         click.echo(f"FAIL Error: {str(e)}")
 
 
-@click.command('revoke-permission')
+@perms_group.command('revoke')
 @click.argument('role_name')
 @click.argument('permission_code')
 @with_appcontext
@@ -353,7 +400,7 @@ def revoke_permission_cli(role_name, permission_code):
         click.echo(f"FAIL Error: {str(e)}")
 
 
-@click.command('check-permission')
+@perms_group.command('check')
 @click.argument('username')
 @click.argument('permission_code')
 @with_appcontext
@@ -384,7 +431,12 @@ def check_permission_cli(username, permission_code):
 # PHASE 8: REGISTER MANAGEMENT COMMANDS
 # =============================================================================
 
-@click.command('create-register')
+@click.group('registers')
+def registers_group():
+    """Register inspection and bootstrap commands."""
+
+
+@registers_group.command('create')
 @click.option('--store-id', type=int, required=True, help='Store ID')
 @click.option('--number', required=True, help='Register number (e.g., REG-01)')
 @click.option('--name', required=True, help='Register name')
@@ -396,7 +448,7 @@ def create_register_cli(store_id, number, name, location, device_id):
     Phase 8: Create a new POS register.
 
     Example:
-        flask create-register --store-id 1 --number REG-01 --name "Front Counter 1" --location "Main Floor"
+        flask registers create --store-id 1 --number REG-01 --name "Front Counter 1" --location "Main Floor"
     """
     from .services import register_service
     from .models import Register
@@ -421,7 +473,7 @@ def create_register_cli(store_id, number, name, location, device_id):
         click.echo(f"FAIL Failed to create register: {str(e)}")
 
 
-@click.command('list-registers')
+@registers_group.command('list')
 @click.option('--store-id', type=int, help='Filter by store ID')
 @click.option('--all', 'show_all', is_flag=True, help='Show inactive registers too')
 @with_appcontext
@@ -430,9 +482,9 @@ def list_registers_cli(store_id, show_all):
     Phase 8: List all registers.
 
     Example:
-        flask list-registers
-        flask list-registers --store-id 1
-        flask list-registers --all
+        flask registers list
+        flask registers list --store-id 1
+        flask registers list --all
     """
     from .models import Register, RegisterSession
 
@@ -470,109 +522,7 @@ def list_registers_cli(store_id, show_all):
     click.echo("="*100 + "\n")
 
 
-@click.command('open-shift')
-@click.option('--register-id', type=int, required=True, help='Register ID')
-@click.option('--username', required=True, help='Username opening the shift')
-@click.option('--opening-cash', type=float, default=0.0, help='Opening cash amount (e.g., 100.00)')
-@with_appcontext
-def open_shift_cli(register_id, username, opening_cash):
-    """
-    Phase 8: Open a new shift on a register.
-
-    Example:
-        flask open-shift --register-id 1 --username cashier --opening-cash 100.00
-    """
-    from .services import register_service
-    from .services.register_service import ShiftError
-
-    try:
-        # Find user
-        user = db.session.query(User).filter_by(username=username).first()
-        if not user:
-            click.echo(f"FAIL User '{username}' not found")
-            return
-
-        # Convert dollars to cents
-        opening_cash_cents = int(opening_cash * 100)
-
-        session = register_service.open_shift(
-            register_id=register_id,
-            user_id=user.id,
-            opening_cash_cents=opening_cash_cents
-        )
-
-        click.echo(f"PASS Shift opened successfully!")
-        click.echo(f"   Session ID: {session.id}")
-        click.echo(f"   Register ID: {session.register_id}")
-        click.echo(f"   User: {username}")
-        click.echo(f"   Opening Cash: ${opening_cash:.2f}")
-        click.echo(f"   Opened At: {session.opened_at}")
-
-    except ShiftError as e:
-        click.echo(f"FAIL Shift Error: {str(e)}")
-    except ValueError as e:
-        click.echo(f"FAIL Error: {str(e)}")
-    except Exception as e:
-        click.echo(f"FAIL Failed to open shift: {str(e)}")
-
-
-@click.command('close-shift')
-@click.option('--session-id', type=int, required=True, help='Session ID to close')
-@click.option('--closing-cash', type=float, required=True, help='Closing cash amount (e.g., 125.50)')
-@click.option('--notes', help='Optional notes about the shift')
-@with_appcontext
-def close_shift_cli(session_id, closing_cash, notes):
-    """
-    Phase 8: Close a shift and calculate variance.
-
-    Example:
-        flask close-shift --session-id 1 --closing-cash 125.50 --notes "Good shift"
-    """
-    from .services import register_service
-    from .services.register_service import ShiftError
-
-    try:
-        # Convert dollars to cents
-        closing_cash_cents = int(closing_cash * 100)
-
-        session = register_service.close_shift(
-            session_id=session_id,
-            closing_cash_cents=closing_cash_cents,
-            notes=notes
-        )
-
-        opening = session.opening_cash_cents / 100
-        expected = session.expected_cash_cents / 100
-        closing = session.closing_cash_cents / 100
-        variance = session.variance_cents / 100
-
-        click.echo(f"PASS Shift closed successfully!")
-        click.echo(f"   Session ID: {session.id}")
-        click.echo(f"   Opening Cash: ${opening:.2f}")
-        click.echo(f"   Expected Cash: ${expected:.2f}")
-        click.echo(f"   Closing Cash: ${closing:.2f}")
-        click.echo(f"   Variance: ${variance:+.2f}")
-
-        if abs(variance) > 0:
-            if variance > 0:
-                click.echo(f"   WARN  OVER by ${abs(variance):.2f}")
-            else:
-                click.echo(f"   WARN  SHORT by ${abs(variance):.2f}")
-        else:
-            click.echo(f"   PASS Cash balanced perfectly!")
-
-        if session.notes:
-            click.echo(f"   Notes: {session.notes}")
-
-    except ShiftError as e:
-        click.echo(f"FAIL Shift Error: {str(e)}")
-    except ValueError as e:
-        click.echo(f"FAIL Error: {str(e)}")
-    except Exception as e:
-        click.echo(f"FAIL Failed to close shift: {str(e)}")
-
-
-@click.command('list-sessions')
+@registers_group.command('sessions')
 @click.option('--register-id', type=int, help='Filter by register ID')
 @click.option('--status', type=click.Choice(['OPEN', 'CLOSED']), help='Filter by status')
 @click.option('--limit', type=int, default=20, help='Max sessions to show')
@@ -582,9 +532,9 @@ def list_sessions_cli(register_id, status, limit):
     Phase 8: List register sessions.
 
     Example:
-        flask list-sessions
-        flask list-sessions --register-id 1
-        flask list-sessions --status OPEN
+        flask registers sessions
+        flask registers sessions --register-id 1
+        flask registers sessions --status OPEN
     """
     from .models import RegisterSession, Register, User
 
@@ -626,7 +576,12 @@ def list_sessions_cli(register_id, status, limit):
     click.echo("="*120 + "\n")
 
 
-@click.command('cleanup-security-events')
+@click.group('maintenance')
+def maintenance_group():
+    """Maintenance commands."""
+
+
+@maintenance_group.command('cleanup-security-events')
 @click.option('--retention-days', type=int, default=90, show_default=True)
 @with_appcontext
 def cleanup_security_events_cli(retention_days):
@@ -641,25 +596,8 @@ def cleanup_security_events_cli(retention_days):
 
 def register_commands(app):
     """Register all CLI commands with Flask app."""
-    app.cli.add_command(init_system)
-    app.cli.add_command(init_roles)
-    app.cli.add_command(create_user_cli)
-    app.cli.add_command(list_users)
-    app.cli.add_command(reset_db)
-
-    # Phase 7: Permission management
-    app.cli.add_command(init_permissions)
-    app.cli.add_command(list_permissions_cli)
-    app.cli.add_command(grant_permission_cli)
-    app.cli.add_command(revoke_permission_cli)
-    app.cli.add_command(check_permission_cli)
-
-    # Phase 8: Register management
-    app.cli.add_command(create_register_cli)
-    app.cli.add_command(list_registers_cli)
-    app.cli.add_command(open_shift_cli)
-    app.cli.add_command(close_shift_cli)
-    app.cli.add_command(list_sessions_cli)
-
-    # Maintenance
-    app.cli.add_command(cleanup_security_events_cli)
+    app.cli.add_command(system_group)
+    app.cli.add_command(users_group)
+    app.cli.add_command(perms_group)
+    app.cli.add_command(registers_group)
+    app.cli.add_command(maintenance_group)

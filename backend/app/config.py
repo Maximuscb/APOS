@@ -4,13 +4,13 @@ import os
 
 
 class Config:
-    # Keep this simple for now; we can move to env vars later.
+    # Optional "SECRET_KEY", with default dev key
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-me")
 
     # SQLite DB stored in backend/instance/apos.sqlite3
     SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL",
-        "sqlite:///apos.sqlite3",
+        "DATABASE_URL", #optional alternative location
+        "sqlite:///apos.sqlite3", #default local location
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
