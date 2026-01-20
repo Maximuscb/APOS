@@ -23,7 +23,8 @@ def upgrade():
     # cash_drawer_events, sale_lines already exist from earlier migrations
 
     # Add payment-related columns to existing sales table
-    # Note: register_id and register_session_id already added in with op.batch_alter_table('sales', schema=None) as batch_op:
+    # Note: register_id and register_session_id already added in earlier migrations.
+    with op.batch_alter_table('sales', schema=None) as batch_op:
         batch_op.add_column(sa.Column('payment_status', sa.String(length=16), nullable=False, server_default='UNPAID'))
         batch_op.add_column(sa.Column('total_due_cents', sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column('total_paid_cents', sa.Integer(), nullable=False, server_default='0'))
@@ -31,28 +32,29 @@ def upgrade():
         batch_op.create_index(batch_op.f('ix_sales_payment_status'), ['payment_status'], unique=False)
 
     # Create payments table
-    op.create_table('payments',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('sale_id', sa.Integer(), nullable=False),
-    sa.Column('tender_type', sa.String(length=32), nullable=False),
-    sa.Column('amount_cents', sa.Integer(), nullable=False),
-    sa.Column('status', sa.String(length=16), nullable=False),
-    sa.Column('reference_number', sa.String(length=128), nullable=True),
-    sa.Column('change_cents', sa.Integer(), nullable=True),
-    sa.Column('created_by_user_id', sa.Integer(), nullable=False),
-    sa.Column('voided_by_user_id', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('voided_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('void_reason', sa.String(length=255), nullable=True),
-    sa.Column('register_id', sa.Integer(), nullable=True),
-    sa.Column('register_session_id', sa.Integer(), nullable=True),
-    sa.ForeignKeyConstraint(['created_by_user_id'], ['users.id'], ),
-    sa.ForeignKeyConstraint(['register_id'], ['registers.id'], ),
-    sa.ForeignKeyConstraint(['register_session_id'], ['register_sessions.id'], ),
-    sa.ForeignKeyConstraint(['sale_id'], ['sales.id'], ),
-    sa.ForeignKeyConstraint(['voided_by_user_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sqlite_autoincrement=True
+    op.create_table(
+        'payments',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('sale_id', sa.Integer(), nullable=False),
+        sa.Column('tender_type', sa.String(length=32), nullable=False),
+        sa.Column('amount_cents', sa.Integer(), nullable=False),
+        sa.Column('status', sa.String(length=16), nullable=False),
+        sa.Column('reference_number', sa.String(length=128), nullable=True),
+        sa.Column('change_cents', sa.Integer(), nullable=True),
+        sa.Column('created_by_user_id', sa.Integer(), nullable=False),
+        sa.Column('voided_by_user_id', sa.Integer(), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+        sa.Column('voided_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('void_reason', sa.String(length=255), nullable=True),
+        sa.Column('register_id', sa.Integer(), nullable=True),
+        sa.Column('register_session_id', sa.Integer(), nullable=True),
+        sa.ForeignKeyConstraint(['created_by_user_id'], ['users.id'], ),
+        sa.ForeignKeyConstraint(['register_id'], ['registers.id'], ),
+        sa.ForeignKeyConstraint(['register_session_id'], ['register_sessions.id'], ),
+        sa.ForeignKeyConstraint(['sale_id'], ['sales.id'], ),
+        sa.ForeignKeyConstraint(['voided_by_user_id'], ['users.id'], ),
+        sa.PrimaryKeyConstraint('id'),
+        sqlite_autoincrement=True,
     )
     with op.batch_alter_table('payments', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_payments_created_at'), ['created_at'], unique=False)
@@ -64,25 +66,26 @@ def upgrade():
         batch_op.create_index(batch_op.f('ix_payments_tender_type'), ['tender_type'], unique=False)
 
     # Create payment_transactions table
-    op.create_table('payment_transactions',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('payment_id', sa.Integer(), nullable=False),
-    sa.Column('sale_id', sa.Integer(), nullable=False),
-    sa.Column('transaction_type', sa.String(length=16), nullable=False),
-    sa.Column('amount_cents', sa.Integer(), nullable=False),
-    sa.Column('tender_type', sa.String(length=32), nullable=False),
-    sa.Column('user_id', sa.Integer(), nullable=False),
-    sa.Column('reason', sa.String(length=255), nullable=True),
-    sa.Column('occurred_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
-    sa.Column('register_id', sa.Integer(), nullable=True),
-    sa.Column('register_session_id', sa.Integer(), nullable=True),
-    sa.ForeignKeyConstraint(['payment_id'], ['payments.id'], ),
-    sa.ForeignKeyConstraint(['register_id'], ['registers.id'], ),
-    sa.ForeignKeyConstraint(['register_session_id'], ['register_sessions.id'], ),
-    sa.ForeignKeyConstraint(['sale_id'], ['sales.id'], ),
-    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sqlite_autoincrement=True
+    op.create_table(
+        'payment_transactions',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('payment_id', sa.Integer(), nullable=False),
+        sa.Column('sale_id', sa.Integer(), nullable=False),
+        sa.Column('transaction_type', sa.String(length=16), nullable=False),
+        sa.Column('amount_cents', sa.Integer(), nullable=False),
+        sa.Column('tender_type', sa.String(length=32), nullable=False),
+        sa.Column('user_id', sa.Integer(), nullable=False),
+        sa.Column('reason', sa.String(length=255), nullable=True),
+        sa.Column('occurred_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+        sa.Column('register_id', sa.Integer(), nullable=True),
+        sa.Column('register_session_id', sa.Integer(), nullable=True),
+        sa.ForeignKeyConstraint(['payment_id'], ['payments.id'], ),
+        sa.ForeignKeyConstraint(['register_id'], ['registers.id'], ),
+        sa.ForeignKeyConstraint(['register_session_id'], ['register_sessions.id'], ),
+        sa.ForeignKeyConstraint(['sale_id'], ['sales.id'], ),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+        sa.PrimaryKeyConstraint('id'),
+        sqlite_autoincrement=True,
     )
     with op.batch_alter_table('payment_transactions', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_payment_transactions_occurred_at'), ['occurred_at'], unique=False)
