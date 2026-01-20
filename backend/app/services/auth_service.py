@@ -243,8 +243,8 @@ def assign_role(user_id: int, role_name: str) -> UserRole:
     return user_role
 
 
-def create_default_roles():
-    """Create standard roles if they don't exist."""
+def create_default_roles(org_id: int):
+    """Create standard roles for a specific organization if they don't exist."""
     roles = [
         ("admin", "Full system access"),
         ("developer", "Full system access with role assignment for development/testing"),
@@ -253,9 +253,10 @@ def create_default_roles():
     ]
 
     for name, desc in roles:
-        existing = db.session.query(Role).filter_by(name=name).first()
+        existing = db.session.query(Role).filter_by(org_id=org_id, name=name).first()
         if not existing:
-            role = Role(name=name, description=desc)
+            role = Role(org_id=org_id, name=name, description=desc)
             db.session.add(role)
 
     db.session.commit()
+

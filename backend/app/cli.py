@@ -110,7 +110,7 @@ def init_system(org_name, org_code):
 
     # 3. Create roles
     click.echo("\nLIST Creating roles...")
-    create_default_roles()
+    create_default_roles(org.id)
     roles = db.session.query(Role).all()
     click.echo(f"PASS Roles created: {', '.join(r.name for r in roles)}")
 
@@ -186,8 +186,12 @@ def init_system(org_name, org_code):
 @with_appcontext
 def init_roles():
     """Create default roles (admin, manager, cashier)."""
+    org = db.session.query(Organization).first()
+    if not org:
+        click.echo("FAIL No organization exists. Run: python -m flask system init")
+        return
     click.echo("LIST Creating default roles...")
-    create_default_roles()
+    create_default_roles(org.id)
     roles = db.session.query(Role).all()
     click.echo(f"PASS Created roles: {', '.join(r.name for r in roles)}")
 

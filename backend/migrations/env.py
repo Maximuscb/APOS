@@ -1,5 +1,3 @@
-# Overview: Alembic environment configuration for migrations.
-
 import logging
 from logging.config import fileConfig
 
