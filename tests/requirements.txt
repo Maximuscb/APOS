@@ -1,0 +1,20 @@
+# APOS Test Suite Dependencies
+
+# Core testing
+pytest>=8.0.0
+pytest-xdist>=3.5.0      # Parallel test execution
+pytest-timeout>=2.2.0    # Test timeout support
+pytest-html>=4.1.0       # HTML test reports
+
+# HTTP client for API tests
+httpx>=0.26.0
+
+# UI E2E tests (optional)
+playwright>=1.40.0
+
+# Load/stress tests (optional)
+locust>=2.20.0
+
+# Coverage reporting
+coverage>=7.4.0
+pytest-cov>=4.1.0
