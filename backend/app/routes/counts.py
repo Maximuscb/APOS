@@ -1,6 +1,8 @@
+# Overview: Flask API routes for counts operations; parses input and returns JSON responses.
+
 # backend/app/routes/counts.py
 """
-Phase 11: Physical inventory count API routes.
+Physical inventory count API routes.
 """
 from flask import Blueprint, request, jsonify, g, current_app
 from app.extensions import db

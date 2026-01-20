@@ -1,3 +1,5 @@
+// Overview: React component for products table UI.
+
 import { useEffect, useMemo, useState } from "react";
 import { apiGet } from "../lib/api";
 import { datetimeLocalToUtcIso } from "../lib/time";

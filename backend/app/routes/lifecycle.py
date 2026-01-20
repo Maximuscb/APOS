@@ -1,6 +1,8 @@
+# Overview: Flask API routes for lifecycle operations; parses input and returns JSON responses.
+
 # backend/app/routes/lifecycle.py
 """
-APOS Phase 5: Document Lifecycle API Routes
+APOS Document Lifecycle API Routes
 
 These routes handle state transitions for inventory transactions:
 - POST /api/lifecycle/approve/:id - Approve a DRAFT transaction (DRAFT -> APPROVED)

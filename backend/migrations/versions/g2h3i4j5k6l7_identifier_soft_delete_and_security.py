@@ -1,3 +1,5 @@
+# Overview: Alembic migration for identifier soft delete and security.
+
 """Add is_active and deactivated_at to product_identifiers for soft delete
 
 Revision ID: g2h3i4j5k6l7

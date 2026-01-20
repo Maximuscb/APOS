@@ -1,3 +1,5 @@
+# Overview: Alembic migration for initial schema with lifecycle.
+
 """initial schema with lifecycle
 
 Revision ID: a1b2c3d4e5f6
@@ -10,7 +12,7 @@ This migration creates the complete APOS schema from scratch, including:
 - inventory_transactions: Append-only inventory ledger with lifecycle support
 - master_ledger_events: Cross-domain audit spine
 
-Phase 5 Document Lifecycle:
+Document Lifecycle:
 - All inventory transactions have status: DRAFT, APPROVED, POSTED
 - Only POSTED transactions affect inventory calculations
 - Approval and posting are tracked with timestamps and user IDs
@@ -28,7 +30,7 @@ depends_on = None
 
 def upgrade():
     """
-    Create all tables from scratch with Phase 5 lifecycle support.
+    Create all tables from scratch with lifecycle support.
 
     WHY: This migration creates the foundational schema for APOS, including
     the document lifecycle fields that prevent accidental posting and enable
@@ -107,16 +109,16 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False,
                   server_default=sa.text('CURRENT_TIMESTAMP')),
 
-        # Sale traceability and idempotency (Phase 4)
+        # Sale traceability and idempotency ()
         sa.Column('sale_id', sa.String(length=64), nullable=True),
         sa.Column('sale_line_id', sa.String(length=64), nullable=True),
 
-        # COGS snapshot (immutable after posting) (Phase 4)
+        # COGS snapshot (immutable after posting) ()
         sa.Column('unit_cost_cents_at_sale', sa.Integer(), nullable=True),
         sa.Column('cogs_cents', sa.Integer(), nullable=True),
 
         # ========================================================================
-        # PHASE 5: DOCUMENT LIFECYCLE
+        # DOCUMENT LIFECYCLE
         # ========================================================================
         # status: Current lifecycle state
         # Default POSTED for backwards compatibility with existing code

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+# Overview: Standalone test runner for payment processing behavior.
+
 """
-Phase 9: Payment Processing Tests
+Payment Processing Tests
 
 Tests payment creation, split payments, change calculation, voids, and payment status tracking.
 
@@ -670,7 +672,7 @@ class PaymentSystemTest(unittest.TestCase):
 def run_tests():
     """Run all tests and display results."""
     print("\n" + "="*80)
-    print("PHASE 9: PAYMENT PROCESSING TESTS")
+    print("PAYMENT PROCESSING TESTS")
     print("="*80 + "\n")
 
     # Create test suite

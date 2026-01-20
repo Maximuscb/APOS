@@ -1,3 +1,5 @@
+# Overview: SQLAlchemy models and relationships for the APOS domain.
+
 # backend/app/models.py
 from __future__ import annotations
 from .extensions import db
@@ -286,13 +288,13 @@ class InventoryTransaction(db.Model):
             "sale_line_id": self.sale_line_id,
             "unit_cost_cents_at_sale": self.unit_cost_cents_at_sale,
             "cogs_cents": self.cogs_cents,
-            # Phase 5: Lifecycle fields
+            # Lifecycle fields
             "status": self.status,
             "approved_by_user_id": self.approved_by_user_id,
             "approved_at": to_utc_z(self.approved_at) if self.approved_at else None,
             "posted_by_user_id": self.posted_by_user_id,
             "posted_at": to_utc_z(self.posted_at) if self.posted_at else None,
-            # Phase 11: Inventory state
+            # Inventory state
             "inventory_state": self.inventory_state,
         }
 
@@ -392,7 +394,7 @@ class ProductIdentifier(db.Model):
 
 class Sale(db.Model):
     """
-    Phase 3: Sale document model (document-first, not inventory-first).
+    Sale document model (document-first, not inventory-first).
 
     WHY: Sales are documents with lifecycle, not just inventory decrements.
     Enables cart editing, suspend/recall, quotes/estimates.
@@ -420,7 +422,7 @@ class Sale(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
     completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
-    # User attribution (nullable until Phase 4 complete)
+    # User attribution (nullable until complete)
     created_by_user_id = db.Column(db.Integer, nullable=True)
 
     # Void audit trail
@@ -428,11 +430,11 @@ class Sale(db.Model):
     voided_at = db.Column(db.DateTime(timezone=True), nullable=True)
     void_reason = db.Column(db.String(255), nullable=True)
 
-    # Phase 8: Register tracking
+    # Register tracking
     register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=True, index=True)
     register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
 
-    # Phase 9: Payment tracking (all amounts in cents)
+    # Payment tracking (all amounts in cents)
     payment_status = db.Column(db.String(16), nullable=False, default="UNPAID", index=True)  # UNPAID, PARTIAL, PAID, OVERPAID
     total_due_cents = db.Column(db.Integer, nullable=True)  # Calculated from sale lines
     total_paid_cents = db.Column(db.Integer, nullable=False, default=0)  # Sum of completed payments
@@ -465,7 +467,7 @@ class Sale(db.Model):
 
 
 class SaleLine(db.Model):
-    """Phase 3: Individual line items on a sale document."""
+    """Individual line items on a sale document."""
     __tablename__ = "sale_lines"
     __table_args__ = {"sqlite_autoincrement": True}
 
@@ -503,7 +505,7 @@ class SaleLine(db.Model):
 
 class Register(db.Model):
     """
-    Phase 8: Physical POS register/terminal.
+    Physical POS register/terminal.
 
     WHY: Track which device processed each transaction. Essential for
     multi-register stores and cash accountability. Each register has
@@ -555,7 +557,7 @@ class Register(db.Model):
 
 class RegisterSession(db.Model):
     """
-    Phase 8: Register shift/session tracking.
+    Register shift/session tracking.
 
     WHY: Cashier accountability. Each shift has opening/closing cash counts,
     tracks all transactions during shift, and provides variance reporting.
@@ -618,7 +620,7 @@ class RegisterSession(db.Model):
 
 class CashDrawerEvent(db.Model):
     """
-    Phase 8: Cash drawer open/close audit trail.
+    Cash drawer open/close audit trail.
 
     WHY: Security and accountability. Every drawer open is logged with reason.
     Unusual patterns (too many opens, opens without sales) can indicate issues.
@@ -677,7 +679,7 @@ class CashDrawerEvent(db.Model):
 
 class Payment(db.Model):
     """
-    Phase 9: Payment record for sales.
+    Payment record for sales.
 
     WHY: Track how customers pay for sales. Supports multiple payment types
     (cash, card, check, etc.) and split payments.
@@ -727,7 +729,7 @@ class Payment(db.Model):
     # Void reason
     void_reason = db.Column(db.String(255), nullable=True)
 
-    # Phase 8: Register tracking
+    # Register tracking
     register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=True, index=True)
     register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
     version_id = db.Column(db.Integer, nullable=False, default=1)
@@ -759,7 +761,7 @@ class Payment(db.Model):
 
 class PaymentTransaction(db.Model):
     """
-    Phase 9: Append-only ledger of payment events.
+    Append-only ledger of payment events.
 
     WHY: Immutable audit trail for all payment activity.
     Every payment creation, void, or refund is logged here.
@@ -801,7 +803,7 @@ class PaymentTransaction(db.Model):
     # Timestamp (immutable)
     occurred_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), index=True)
 
-    # Phase 8: Register tracking
+    # Register tracking
     register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=True, index=True)
     register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
 
@@ -827,7 +829,7 @@ class PaymentTransaction(db.Model):
 
 class Return(db.Model):
     """
-    Phase 10: Product return document.
+    Product return document.
 
     WHY: Retail returns are common and require careful COGS handling.
     Must credit the ORIGINAL sale cost, not current WAC, for accurate accounting.
@@ -891,7 +893,7 @@ class Return(db.Model):
     # Rejection reason (manager explanation)
     rejection_reason = db.Column(db.Text, nullable=True)
 
-    # Phase 8: Register tracking
+    # Register tracking
     register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=True, index=True)
     register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
     version_id = db.Column(db.Integer, nullable=False, default=1)
@@ -929,7 +931,7 @@ class Return(db.Model):
 
 class ReturnLine(db.Model):
     """
-    Phase 10: Individual line items on a return document.
+    Individual line items on a return document.
 
     WHY: Track which specific items from the original sale are being returned.
     Links to original SaleLine for COGS reversal.
@@ -993,7 +995,7 @@ class ReturnLine(db.Model):
 
 class Transfer(db.Model):
     """
-    Phase 11: Inter-store inventory transfer document.
+    Inter-store inventory transfer document.
 
     LIFECYCLE:
     1. PENDING: Transfer created, awaiting manager approval
@@ -1086,7 +1088,7 @@ class Transfer(db.Model):
 
 class TransferLine(db.Model):
     """
-    Phase 11: Individual line items on a transfer document.
+    Individual line items on a transfer document.
 
     WHY: Track which specific products and quantities are being transferred.
     Links to inventory transactions at source and destination stores.
@@ -1136,7 +1138,7 @@ class TransferLine(db.Model):
 
 class Count(db.Model):
     """
-    Phase 11: Physical inventory count document (cycle count or full count).
+    Physical inventory count document (cycle count or full count).
 
     LIFECYCLE:
     1. PENDING: Count created, lines being entered
@@ -1229,7 +1231,7 @@ class Count(db.Model):
 
 class CountLine(db.Model):
     """
-    Phase 11: Individual line items on a count document.
+    Individual line items on a count document.
 
     WHY: Track expected vs. actual quantities for each product.
     Variance (actual - expected) is posted as ADJUST transaction.
@@ -1342,7 +1344,7 @@ class User(db.Model):
 
 class Role(db.Model):
     """
-    Phase 4: Role-based permissions.
+    Role-based permissions.
 
     MULTI-TENANT RBAC:
     - Roles are org-scoped: each organization can define its own roles
@@ -1392,7 +1394,7 @@ class Role(db.Model):
 
 
 class UserRole(db.Model):
-    """Phase 4: User-Role association."""
+    """User-Role association."""
     __tablename__ = "user_roles"
     __table_args__ = (
         db.UniqueConstraint("user_id", "role_id", name="uq_user_roles"),
@@ -1419,7 +1421,7 @@ class UserRole(db.Model):
 
 class Permission(db.Model):
     """
-    Phase 7: Permissions for role-based access control.
+    Permissions for role-based access control.
 
     WHY: Roles need enforceable permissions. This table defines what actions exist.
     RolePermission links these to roles.
@@ -1451,7 +1453,7 @@ class Permission(db.Model):
 
 class RolePermission(db.Model):
     """
-    Phase 7: Role-Permission association.
+    Role-Permission association.
 
     WHY: Defines which roles have which permissions.
     Many-to-many relationship between roles and permissions.
@@ -1676,7 +1678,7 @@ class MasterLedgerEvent(db.Model):
 
 class DocumentSequence(db.Model):
     """
-    Phase 15: Atomic per-store document sequences.
+    Atomic per-store document sequences.
 
     WHY: Prevent race conditions when generating document numbers
     (sales, returns, transfers, counts).

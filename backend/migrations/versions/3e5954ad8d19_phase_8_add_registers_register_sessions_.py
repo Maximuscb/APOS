@@ -1,4 +1,6 @@
-"""Phase 8: Add registers, register_sessions, and cash_drawer_events tables
+# Overview: Alembic migration for 8 add registers register sessions.
+
+"""Add registers, register_sessions, and cash_drawer_events tables
 
 Revision ID: 3e5954ad8d19
 Revises: 7b6e4094dce4

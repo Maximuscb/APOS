@@ -1,3 +1,5 @@
+# Overview: Alembic migration for schema consistency multitenancy.
+
 """Multi-tenant schema consistency: document numbers, identifiers, roles
 
 MIGRATION OVERVIEW:
@@ -50,9 +52,9 @@ depends_on = None
 
 def upgrade():
     # ==========================================================================
-    # PHASE 1: Fix Transfer document_number uniqueness
+    # Fix Transfer document_number uniqueness
     # ==========================================================================
-    print("Phase 1: Fixing Transfer.document_number uniqueness...")
+    print("Fixing Transfer.document_number uniqueness...")
 
     # Check if old unique constraint exists and drop it
     # Note: SQLite doesn't support DROP CONSTRAINT directly, need batch mode
@@ -95,9 +97,9 @@ def upgrade():
     )
 
     # ==========================================================================
-    # PHASE 2: Fix Count document_number uniqueness
+    # Fix Count document_number uniqueness
     # ==========================================================================
-    print("Phase 2: Fixing Count.document_number uniqueness...")
+    print("Fixing Count.document_number uniqueness...")
 
     if dialect == 'sqlite':
         with op.batch_alter_table('counts', schema=None) as batch_op:
@@ -132,9 +134,9 @@ def upgrade():
     )
 
     # ==========================================================================
-    # PHASE 3: Add scoping columns to ProductIdentifier
+    # Add scoping columns to ProductIdentifier
     # ==========================================================================
-    print("Phase 3: Adding org_id and store_id to product_identifiers...")
+    print("Adding org_id and store_id to product_identifiers...")
 
     # Add columns as nullable first
     op.add_column('product_identifiers',
@@ -143,9 +145,9 @@ def upgrade():
         sa.Column('store_id', sa.Integer(), nullable=True))
 
     # ==========================================================================
-    # PHASE 4: Backfill ProductIdentifier scope columns
+    # Backfill ProductIdentifier scope columns
     # ==========================================================================
-    print("Phase 4: Backfilling ProductIdentifier org_id and store_id from Product -> Store...")
+    print("Backfilling ProductIdentifier org_id and store_id from Product -> Store...")
 
     # Backfill org_id and store_id from Product.store_id -> Store.org_id
     if dialect == 'sqlite':
@@ -178,9 +180,9 @@ def upgrade():
         """)
 
     # ==========================================================================
-    # PHASE 5: Handle identifier duplicates before adding constraint
+    # Handle identifier duplicates before adding constraint
     # ==========================================================================
-    print("Phase 5: Resolving identifier duplicates (deactivating older records)...")
+    print("Resolving identifier duplicates (deactivating older records)...")
 
     # Deactivate duplicate identifiers, keeping only the most recent active one
     # Strategy: For each (org_id, type, value) group with multiple active records,
@@ -226,9 +228,9 @@ def upgrade():
         """)
 
     # ==========================================================================
-    # PHASE 6: Make org_id non-nullable and add constraints
+    # Make org_id non-nullable and add constraints
     # ==========================================================================
-    print("Phase 6: Making org_id non-nullable and adding constraints...")
+    print("Making org_id non-nullable and adding constraints...")
 
     # Check for any remaining NULL org_id (shouldn't happen if products exist)
     # If there are orphaned identifiers, fail with clear error
@@ -296,9 +298,9 @@ def upgrade():
     )
 
     # ==========================================================================
-    # PHASE 7: Add org_id to roles table
+    # Add org_id to roles table
     # ==========================================================================
-    print("Phase 7: Adding org_id to roles table...")
+    print("Adding org_id to roles table...")
 
     # Add column as nullable first
     op.add_column('roles',
@@ -349,9 +351,9 @@ def upgrade():
     op.create_index('ix_roles_org_id', 'roles', ['org_id'])
 
     # ==========================================================================
-    # PHASE 8: Add missing indexes on high-volume tables
+    # Add missing indexes on high-volume tables
     # ==========================================================================
-    print("Phase 8: Adding composite indexes for query optimization...")
+    print("Adding composite indexes for query optimization...")
 
     # Sales indexes
     try:
@@ -409,9 +411,9 @@ def downgrade():
     dialect = bind.dialect.name
 
     # ==========================================================================
-    # REVERSE PHASE 8: Drop added indexes
+    # REVERSE Drop added indexes
     # ==========================================================================
-    print("Downgrade Phase 8: Removing added indexes...")
+    print("Downgrade Removing added indexes...")
 
     for idx_name, table_name in [
         ('ix_products_store_active', 'products'),
@@ -426,9 +428,9 @@ def downgrade():
             pass
 
     # ==========================================================================
-    # REVERSE PHASE 7: Remove org_id from roles
+    # REVERSE Remove org_id from roles
     # ==========================================================================
-    print("Downgrade Phase 7: Removing org_id from roles...")
+    print("Downgrade Removing org_id from roles...")
 
     op.drop_index('ix_roles_org_id', 'roles')
     op.drop_constraint('uq_roles_org_name', 'roles', type_='unique')
@@ -439,9 +441,9 @@ def downgrade():
     op.create_unique_constraint('uq_roles_name', 'roles', ['name'])
 
     # ==========================================================================
-    # REVERSE PHASE 6: Remove identifier constraints and columns
+    # REVERSE Remove identifier constraints and columns
     # ==========================================================================
-    print("Downgrade Phase 6: Removing identifier scoping...")
+    print("Downgrade Removing identifier scoping...")
 
     # Drop new indexes and constraints
     for idx_name in [
@@ -470,9 +472,9 @@ def downgrade():
     )
 
     # ==========================================================================
-    # REVERSE PHASE 2: Restore Count global uniqueness
+    # REVERSE Restore Count global uniqueness
     # ==========================================================================
-    print("Downgrade Phase 2: Restoring Count global uniqueness...")
+    print("Downgrade Restoring Count global uniqueness...")
 
     op.drop_index('ix_counts_document_number', 'counts')
     op.drop_constraint('uq_counts_store_docnum', 'counts', type_='unique')
@@ -485,9 +487,9 @@ def downgrade():
         op.create_unique_constraint('uq_counts_document_number', 'counts', ['document_number'])
 
     # ==========================================================================
-    # REVERSE PHASE 1: Restore Transfer global uniqueness
+    # REVERSE Restore Transfer global uniqueness
     # ==========================================================================
-    print("Downgrade Phase 1: Restoring Transfer global uniqueness...")
+    print("Downgrade Restoring Transfer global uniqueness...")
 
     op.drop_index('ix_transfers_document_number', 'transfers')
     op.drop_constraint('uq_transfers_store_docnum', 'transfers', type_='unique')

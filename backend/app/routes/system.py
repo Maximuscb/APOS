@@ -1,3 +1,5 @@
+# Overview: Flask API routes for system operations; parses input and returns JSON responses.
+
 # backend/app/routes/system.py
 """
 System health and version endpoints.

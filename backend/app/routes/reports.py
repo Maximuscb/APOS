@@ -1,3 +1,5 @@
+# Overview: Flask API routes for reports operations; parses input and returns JSON responses.
+
 from flask import Blueprint, jsonify, request
 
 from app.decorators import require_auth, require_permission

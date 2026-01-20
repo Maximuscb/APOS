@@ -1,6 +1,8 @@
+# Overview: Flask API routes for identifiers operations; parses input and returns JSON responses.
+
 # backend/app/routes/identifiers.py
 """
-Phase 2: Identifier API routes
+Identifier API routes
 
 SECURITY: All routes require authentication.
 - Lookup operations require VIEW_INVENTORY permission (inventory data shouldn't be public)

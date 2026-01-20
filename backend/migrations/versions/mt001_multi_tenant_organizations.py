@@ -1,3 +1,5 @@
+# Overview: Alembic migration for multi tenant organizations.
+
 """Multi-tenant: Add organizations table and org_id to stores/users/sessions
 
 MULTI-TENANT MIGRATION:

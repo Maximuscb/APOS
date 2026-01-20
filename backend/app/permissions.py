@@ -1,5 +1,7 @@
+# Overview: Permission definitions and default role mappings.
+
 """
-Phase 7: Permission System Constants and Definitions
+Permission System Constants and Definitions
 
 WHY: Centralized permission definitions ensure consistency across the application.
 All permission codes and role mappings defined here.

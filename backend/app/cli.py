@@ -1,3 +1,5 @@
+# Overview: Flask CLI command groups for bootstrap, inspection, and maintenance.
+
 # backend/app/cli.py
 # Commands Legend (run from the backend directory):
 # Prereqs:
@@ -397,19 +399,19 @@ def reset_db(yes):
 
 
 # =============================================================================
-# PHASE 7: PERMISSION MANAGEMENT COMMANDS
+# PERMISSION MANAGEMENT COMMANDS
 # =============================================================================
 
 @system_group.command('init-permissions')
 @with_appcontext
 def init_permissions():
     """
-    Phase 7: Initialize permission system.
+    Initialize permission system.
 
     Creates all permissions and assigns default permissions to roles.
     Safe to run multiple times (idempotent).
     """
-    click.echo("SECURITY Phase 7: Initializing Permission System...")
+    click.echo("SECURITY Initializing Permission System...")
     click.echo("")
 
     # 1. Create all permission definitions
@@ -570,7 +572,7 @@ def check_permission_cli(username, permission_code):
 
 
 # =============================================================================
-# PHASE 8: REGISTER MANAGEMENT COMMANDS
+# REGISTER MANAGEMENT COMMANDS
 # =============================================================================
 
 @click.group('registers')
@@ -587,7 +589,7 @@ def registers_group():
 @with_appcontext
 def create_register_cli(store_id, number, name, location, device_id):
     """
-    Phase 8: Create a new POS register.
+    Create a new POS register.
 
     Example:
         flask registers create --store-id 1 --number REG-01 --name "Front Counter 1" --location "Main Floor"
@@ -621,7 +623,7 @@ def create_register_cli(store_id, number, name, location, device_id):
 @with_appcontext
 def list_registers_cli(store_id, show_all):
     """
-    Phase 8: List all registers.
+    List all registers.
 
     Example:
         flask registers list
@@ -671,7 +673,7 @@ def list_registers_cli(store_id, show_all):
 @with_appcontext
 def list_sessions_cli(register_id, status, limit):
     """
-    Phase 8: List register sessions.
+    List register sessions.
 
     Example:
         flask registers sessions

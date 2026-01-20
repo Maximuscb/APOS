@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+# Overview: Standalone test runner for register and session behavior.
+
 """
-Phase 8: Register and Shift Management Tests
+Register and Shift Management Tests
 
 Tests register creation, shift operations, cash drawer tracking, and variance calculation.
 
@@ -607,7 +609,7 @@ class RegisterSystemTest(unittest.TestCase):
 def run_tests():
     """Run all tests and display results."""
     print("\n" + "="*80)
-    print("PHASE 8: REGISTER & SHIFT MANAGEMENT TESTS")
+    print("REGISTER & SHIFT MANAGEMENT TESTS")
     print("="*80 + "\n")
 
     # Create test suite

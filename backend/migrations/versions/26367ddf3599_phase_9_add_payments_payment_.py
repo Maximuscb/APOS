@@ -1,4 +1,6 @@
-"""Phase 9: Add payments, payment_transactions, and update sales for payment tracking
+# Overview: Alembic migration for 9 add payments payment.
+
+"""Add payments, payment_transactions, and update sales for payment tracking
 
 Revision ID: 26367ddf3599
 Revises: 3e5954ad8d19
@@ -17,12 +19,11 @@ depends_on = None
 
 
 def upgrade():
-    # NOTE: Phase 9 only adds payment tracking to sales and creates payment tables
+    # NOTE: only adds payment tracking to sales and creates payment tables
     # cash_drawer_events, sale_lines already exist from earlier migrations
 
     # Add payment-related columns to existing sales table
-    # Note: register_id and register_session_id already added in Phase 8
-    with op.batch_alter_table('sales', schema=None) as batch_op:
+    # Note: register_id and register_session_id already added in with op.batch_alter_table('sales', schema=None) as batch_op:
         batch_op.add_column(sa.Column('payment_status', sa.String(length=16), nullable=False, server_default='UNPAID'))
         batch_op.add_column(sa.Column('total_due_cents', sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column('total_paid_cents', sa.Integer(), nullable=False, server_default='0'))
@@ -129,4 +130,4 @@ def downgrade():
         batch_op.drop_column('total_paid_cents')
         batch_op.drop_column('total_due_cents')
         batch_op.drop_column('payment_status')
-        # Note: register_id and register_session_id remain (from Phase 8)
+        # Note: register_id and register_session_id remain (from )

@@ -1,3 +1,5 @@
+// Overview: React component for master ledger UI.
+
 // frontend/src/components/MasterLedger.tsx
 import { useEffect, useMemo, useState } from "react";
 import { apiGet } from "../lib/api";

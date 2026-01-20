@@ -1,5 +1,7 @@
+# Overview: Service-layer operations for register; encapsulates business logic and database work.
+
 """
-Phase 8: Register and Shift Management Service
+Register and Shift Management Service
 
 WHY: Track POS terminals, cashier shifts, and cash accountability.
 Essential for multi-register stores and audit trails.

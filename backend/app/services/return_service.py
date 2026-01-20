@@ -1,5 +1,7 @@
+# Overview: Service-layer operations for return; encapsulates business logic and database work.
+
 """
-Phase 10: Return Processing Service
+Return Processing Service
 
 WHY: Retail returns are common and require careful accounting. The critical
 challenge is COGS reversal: we must credit the ORIGINAL sale cost, not the

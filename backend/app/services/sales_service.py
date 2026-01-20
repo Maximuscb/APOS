@@ -1,5 +1,7 @@
+# Overview: Service-layer operations for sales; encapsulates business logic and database work.
+
 """
-Phase 3: Sales Service - Document-first sale processing
+Sales Service - Document-first sale processing
 
 WHY: Separates sale intent from inventory posting. Enables cart editing,
 suspend/recall, and proper lifecycle.

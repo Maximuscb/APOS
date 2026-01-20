@@ -1,6 +1,8 @@
+# Overview: Service-layer operations for transfer; encapsulates business logic and database work.
+
 # backend/app/services/transfer_service.py
 """
-Phase 11: Inter-store transfer service.
+Inter-store transfer service.
 
 WHY: Manage inventory transfers between stores with proper workflow,
 approval, and accountability. Creates TRANSFER inventory transactions

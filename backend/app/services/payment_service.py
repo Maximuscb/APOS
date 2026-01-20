@@ -1,5 +1,7 @@
+# Overview: Service-layer operations for payment; encapsulates business logic and database work.
+
 """
-Phase 9: Payment Processing Service
+Payment Processing Service
 
 WHY: Enable sales to be paid with cash, cards, checks, and other tender types.
 Supports split payments, change calculation, and payment voids.

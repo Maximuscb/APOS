@@ -1,4 +1,6 @@
-"""Phase 15: Ledger expansion, document sequences, sale voids, and controls
+# Overview: Alembic migration for 15 ledger sequences voids.
+
+"""Ledger expansion, document sequences, sale voids, and controls
 
 Revision ID: h4i5j6k7l8m9
 Revises: g2h3i4j5k6l7

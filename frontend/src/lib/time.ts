@@ -1,3 +1,5 @@
+// Overview: Time formatting and parsing helpers for the UI.
+
 // frontend/src/lib/time.ts
 
 // Convert an <input type="datetime-local"> value (local time, no tz) into UTC ISO with 'Z'.

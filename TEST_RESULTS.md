@@ -17,23 +17,23 @@ Multiple migration files contained duplicate table creations, causing `table alr
 
 ### Migrations Fixed
 
-#### Phase 9 Migration (`26367ddf3599_phase_9_add_payments_payment_.py`)
+#### Migration (`26367ddf3599_phase_9_add_payments_payment_.py`)
 
 **Original Issue**: Attempted to create all base tables (permissions, roles, stores, products, etc.) that were already created in earlier migrations.
 
 **Fix Applied**:
 - Removed duplicate table creations for: permissions, roles, stores, products, registers, users, inventory_transactions, product_identifiers, register_sessions, security_events, session_tokens, user_roles, master_ledger_events
-- Removed duplicate creations for tables from Phase 8: cash_drawer_events, sale_lines
-- Kept only Phase 9-specific additions:
+- Removed duplicate creations for tables from cash_drawer_events, sale_lines
+- Kept only specific additions:
   - Payment tracking columns added to `sales` table (payment_status, total_due_cents, total_paid_cents, change_due_cents)
   - New tables: `payments`, `payment_transactions`
-- Fixed column additions: register_id and register_session_id were already added in Phase 8, so removed duplicate additions
+- Fixed column additions: register_id and register_session_id were already added in , so removed duplicate additions
 
-**Result**: Phase 9 migration now runs successfully.
+**Result**: migration now runs successfully.
 
 ### Remaining Migration Issues
 
-**Phase 10 and later migrations** still contain similar duplicate table creation issues. Due to time constraints, these were not fixed. The test suite was designed to work around this by using `db.create_all()` which creates tables directly from models, bypassing migrations entirely.
+**and later migrations** still contain similar duplicate table creation issues. Due to time constraints, these were not fixed. The test suite was designed to work around this by using `db.create_all()` which creates tables directly from models, bypassing migrations entirely.
 
 **Recommendation**: Regenerate all migrations from scratch using `flask db migrate` after ensuring models are correct, or manually audit and fix each migration file.
 
@@ -173,7 +173,7 @@ The existing test files (`Audit.py`, `AuthenticationAudit.py`, `PermissionAudit.
 
 1. **Fix Migration Files**
    - Either regenerate all migrations from scratch
-   - Or manually audit and fix Phase 10+ migrations
+   - Or manually audit and fix migrations
 
 2. **Fix Permission Status Code Bug**
    - Update `require_permission` decorator to return 403 for permission denied

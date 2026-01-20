@@ -1,4 +1,6 @@
-"""Phase 10: Add returns, return_lines tables for product returns with COGS reversal
+# Overview: Alembic migration for 10 add returns return lines.
+
+"""Add returns, return_lines tables for product returns with COGS reversal
 
 Revision ID: e1426ef98adf
 Revises: 26367ddf3599

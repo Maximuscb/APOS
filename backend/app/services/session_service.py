@@ -1,3 +1,5 @@
+# Overview: Service-layer operations for session; encapsulates business logic and database work.
+
 """
 Session Token Management Service with Multi-Tenant Support
 

@@ -1,3 +1,5 @@
+# Overview: Service-layer operations for auth; encapsulates business logic and database work.
+
 """
 Production-Ready Authentication Service with Multi-Tenant Support
 

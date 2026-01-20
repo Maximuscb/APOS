@@ -1,4 +1,6 @@
-"""Phase 7: Add permissions, role_permissions, and security_events tables
+# Overview: Alembic migration for 7 add permissions role.
+
+"""Add permissions, role_permissions, and security_events tables
 
 Revision ID: 7b6e4094dce4
 Revises: 46b132a5b02e

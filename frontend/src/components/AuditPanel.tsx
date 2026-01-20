@@ -1,3 +1,5 @@
+// Overview: React component for audit panel UI.
+
 import { useEffect, useState } from "react";
 import { apiGet } from "../lib/api";
 

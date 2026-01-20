@@ -1,6 +1,8 @@
+# Overview: Flask API routes for payments operations; parses input and returns JSON responses.
+
 # backend/app/routes/payments.py
 """
-Phase 9: Payment Processing API Routes
+Payment Processing API Routes
 
 WHY: Enable sales to be paid via REST API.
 Supports cash, card, check, and other tender types.

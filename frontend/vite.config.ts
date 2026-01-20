@@ -1,3 +1,5 @@
+// Overview: Vite build and dev server configuration.
+
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 

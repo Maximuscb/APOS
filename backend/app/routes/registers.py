@@ -1,6 +1,8 @@
+# Overview: Flask API routes for registers operations; parses input and returns JSON responses.
+
 # backend/app/routes/registers.py
 """
-Phase 8: Register Management API Routes
+Register Management API Routes
 
 WHY: Enable POS register operations and shift accountability.
 Provides endpoints for register setup, shift management, and cash drawer tracking.

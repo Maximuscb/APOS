@@ -1,3 +1,5 @@
+// Overview: React component for operations panel UI.
+
 import { useState } from "react";
 import { ReturnsWorkflow } from "./operations/ReturnsWorkflow";
 import { TransfersWorkflow } from "./operations/TransfersWorkflow";

@@ -1,4 +1,6 @@
-"""Phase 6: Add session_tokens table for secure authentication
+# Overview: Alembic migration for 6 add session tokens table for.
+
+"""Add session_tokens table for secure authentication
 
 Revision ID: 46b132a5b02e
 Revises: 361a2c35d372

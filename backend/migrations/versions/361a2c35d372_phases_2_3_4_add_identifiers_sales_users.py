@@ -1,3 +1,5 @@
+# Overview: Alembic migration for s 2 3 4 add identifiers sales users.
+
 """phases_2_3_4_add_identifiers_sales_users
 
 Revision ID: 361a2c35d372

@@ -1,3 +1,5 @@
+# Overview: Input validation helpers shared by routes and services.
+
 from __future__ import annotations
 from datetime import datetime
 from app.time_utils import parse_iso_datetime

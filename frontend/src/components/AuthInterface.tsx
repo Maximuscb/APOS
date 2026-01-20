@@ -1,3 +1,5 @@
+// Overview: React component for auth interface UI.
+
 // frontend/src/components/AuthInterface.tsx
 import { useEffect, useState } from "react";
 import { apiPost, clearAuthToken, getAuthToken, setAuthToken } from "../lib/api";

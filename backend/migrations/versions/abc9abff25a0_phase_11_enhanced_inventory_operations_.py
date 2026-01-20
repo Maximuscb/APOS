@@ -1,4 +1,6 @@
-"""Phase 11: Enhanced inventory operations - inventory states, transfers, counts
+# Overview: Alembic migration for 11 enhanced inventory operations.
+
+"""Enhanced inventory operations - inventory states, transfers, counts
 
 Revision ID: abc9abff25a0
 Revises: e1426ef98adf

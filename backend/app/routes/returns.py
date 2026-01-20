@@ -1,6 +1,8 @@
+# Overview: Flask API routes for returns operations; parses input and returns JSON responses.
+
 # backend/app/routes/returns.py
 """
-Phase 10: Return Processing API Routes
+Return Processing API Routes
 
 WHY: Enable product returns via REST API with manager approval workflow.
 

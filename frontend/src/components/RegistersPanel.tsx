@@ -1,3 +1,5 @@
+// Overview: React component for registers panel UI.
+
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../lib/api";
 

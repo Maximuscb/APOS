@@ -1,3 +1,5 @@
+# Overview: Flask API routes for products operations; parses input and returns JSON responses.
+
 # backend/app/routes/products.py
 """
 Product management routes with multi-tenant support.

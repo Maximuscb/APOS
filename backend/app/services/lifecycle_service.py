@@ -1,5 +1,7 @@
+# Overview: Service-layer operations for lifecycle; encapsulates business logic and database work.
+
 """
-APOS Document Lifecycle Service (Phase 5)
+APOS Document Lifecycle Service ()
 
 ================================================================================
 PURPOSE: Enforce Draft -> Approved -> Posted lifecycle for inventory transactions
@@ -27,7 +29,7 @@ RULES (NON-NEGOTIABLE):
 5. Master ledger events are created ONLY on posting, not on draft/approval
 
 FUTURE EXTENSIONS:
-- User-based authorization (requires Phase 4: Auth)
+- User-based authorization (requires Auth)
 - Threshold-based approval requirements (e.g., >$1000 adjustments)
 - Manager override workflows
 - Automatic approval for low-risk transactions (e.g., POS sales)
@@ -214,7 +216,7 @@ def post_transaction(
 
     db.session.commit()
 
-    # TODO (Phase 5.1): Create master ledger event here instead of inventory_service
+    # TODO (): Create master ledger event here instead of inventory_service
     # This would centralize all lifecycle behavior in one place
 
     return tx

@@ -1,3 +1,5 @@
+// Overview: React component for create product form UI.
+
 import { useState } from "react";
 import { apiPost } from "../lib/api";
 

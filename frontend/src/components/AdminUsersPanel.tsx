@@ -1,3 +1,5 @@
+// Overview: React component for admin users panel UI.
+
 import { useEffect, useState } from "react";
 import { apiGet, apiPost, apiDelete } from "../lib/api";
 

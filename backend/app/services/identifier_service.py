@@ -1,5 +1,7 @@
+# Overview: Service-layer operations for identifier; encapsulates business logic and database work.
+
 """
-Phase 2: Identifier Service - First-class identifier lookup
+Identifier Service - First-class identifier lookup
 
 WHY: Prevents silent mis-scans and barcode conflicts. Deterministic lookup
 with priority rules prevents ambiguity.

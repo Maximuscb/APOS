@@ -1,3 +1,5 @@
+# Overview: Flask API routes for admin operations; parses input and returns JSON responses.
+
 # backend/app/routes/admin.py
 """
 Admin routes for user and role management.

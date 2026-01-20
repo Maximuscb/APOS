@@ -1,3 +1,5 @@
+# Overview: Service-layer operations for concurrency; encapsulates business logic and database work.
+
 from __future__ import annotations
 
 import time

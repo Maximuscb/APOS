@@ -1,3 +1,5 @@
+# Overview: Service-layer operations for permission; encapsulates business logic and database work.
+
 """
 Permission Checking and Security Event Logging with Multi-Tenant Support
 

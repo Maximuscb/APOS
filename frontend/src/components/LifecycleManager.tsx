@@ -1,3 +1,5 @@
+// Overview: React component for lifecycle manager UI.
+
 // frontend/src/components/LifecycleManager.tsx
 import { useState, useEffect } from "react";
 import { apiGet, apiPost } from "../lib/api";

@@ -1,8 +1,8 @@
 Test Change
 # APOS Setup & CLI Guide
 
-**Phase 6: Production-Ready Authentication**
-**Phase 7: Role-Based Permissions**
+**Production-Ready Authentication**
+**Role-Based Permissions**
 
 This guide covers setup, CLI commands, security, and permission management for APOS.
 
@@ -41,7 +41,7 @@ Visit: **http://localhost:5173**
 
 ---
 
-## Security & Authentication (Phase 6)
+## Security & Authentication ()
 
 ### Password Requirements
 
@@ -93,7 +93,7 @@ Response includes `token` field for subsequent requests.
 
 ---
 
-## Role-Based Permissions (Phase 7)
+## Role-Based Permissions ()
 
 ### Permission System
 
@@ -218,7 +218,7 @@ FLASK_APP=wsgi.py python -m flask check-permission admin SYSTEM_ADMIN
 
 ---
 
-## Register Management (Phase 8)
+## Register Management ()
 
 ### Overview
 
@@ -566,7 +566,7 @@ Creates:
 FLASK_APP=wsgi.py python -m flask init-system
 ```
 
-**Default Credentials (Phase 6):**
+**Default Credentials ():**
 ```
 admin    → admin@apos.local    / Password123!
 manager  → manager@apos.local  / Password123!
@@ -576,7 +576,7 @@ cashier  → cashier@apos.local  / Password123!
 ⚠️ **SECURITY WARNINGS:**
 - Passwords are now **securely hashed with bcrypt**
 - **Change all passwords immediately in production!**
-- Default passwords meet Phase 6 requirements but are publicly documented
+- Default passwords meet requirements but are publicly documented
 - Use `flask create-user` to create users with unique passwords
 
 ---
@@ -707,17 +707,17 @@ python AuthenticationAudit.py
 ```bash
 cd backend
 
-# Phase 1-3: Core inventory and COGS tests
+# Core inventory and COGS tests
 python Audit.py
 
-# Phase 5: Document lifecycle tests
+# Document lifecycle tests
 python LifecycleAudit.py
 
-# Phase 6: Authentication security tests
+# Authentication security tests
 python AuthenticationAudit.py
 ```
 
-### Authentication Tests (Phase 6)
+### Authentication Tests ()
 
 `AuthenticationAudit.py` verifies:
 - Password strength validation
@@ -809,10 +809,9 @@ python LifecycleAudit.py  # Lifecycle tests
 
 ## Production Deployment
 
-### ✅ Phase 6 Security Complete
+### ✅ Security Complete
 
-The following are **now implemented** in Phase 6:
-- ✅ bcrypt password hashing (cost factor 12)
+The following are **now implemented** in - ✅ bcrypt password hashing (cost factor 12)
 - ✅ Strong password validation
 - ✅ Secure session token management
 - ✅ Session timeouts (24-hour absolute, 2-hour idle)
@@ -899,7 +898,7 @@ The following are **now implemented** in Phase 6:
   - Force password change every 90 days?
   - Notify users of password resets
 
-**Future Enhancements (Phase 7+):**
+**Future Enhancements ():**
 
 - [ ] Implement role-based permissions enforcement
 - [ ] Add manager override workflows
@@ -908,7 +907,7 @@ The following are **now implemented** in Phase 6:
 - [ ] Implement password reset via email
 - [ ] Add two-factor authentication (2FA)
 
-### Migration from Phase 4 Stub Auth
+### Migration from Stub Auth
 
 If you have existing users with `STUB_HASH_` passwords:
 
@@ -924,7 +923,7 @@ If you have existing users with `STUB_HASH_` passwords:
        revoke_all_user_sessions(user.id, "Security upgrade - password reset required")
    ```
 
-4. Users create new passwords meeting Phase 6 requirements
+4. Users create new passwords meeting requirements
 5. New passwords automatically use bcrypt
 
 ---
@@ -945,11 +944,11 @@ cd backend && FLASK_APP=wsgi.py python -m flask init-system
 cd backend && FLASK_APP=wsgi.py python -m flask list-users
 cd backend && FLASK_APP=wsgi.py python -m flask create-user
 
-# Permission Management (Phase 7)
+# Permission Management ()
 cd backend && FLASK_APP=wsgi.py python -m flask list-permissions
 cd backend && FLASK_APP=wsgi.py python -m flask check-permission admin SYSTEM_ADMIN
 
-# Register Management (Phase 8)
+# Register Management ()
 cd backend && FLASK_APP=wsgi.py python -m flask create-register --store-id 1 --number "REG-01" --name "Front Counter"
 cd backend && FLASK_APP=wsgi.py python -m flask list-registers
 cd backend && FLASK_APP=wsgi.py python -m flask open-shift --register-id 1 --username cashier --opening-cash 100.00

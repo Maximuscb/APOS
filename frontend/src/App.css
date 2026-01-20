@@ -1,3 +1,5 @@
+/* Overview: App-level component styles. */
+
 .app-shell {
   display: flex;
   min-height: 100vh;

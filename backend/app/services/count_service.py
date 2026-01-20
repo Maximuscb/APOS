@@ -1,6 +1,8 @@
+# Overview: Service-layer operations for count; encapsulates business logic and database work.
+
 # backend/app/services/count_service.py
 """
-Phase 11: Physical inventory count service.
+Physical inventory count service.
 
 WHY: Regular physical counts ensure inventory accuracy. Compares
 expected (system) vs. actual (physical) quantities and posts variances

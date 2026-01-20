@@ -1,6 +1,8 @@
+# Overview: Flask API routes for auth operations; parses input and returns JSON responses.
+
 # backend/app/routes/auth.py
 """
-Phase 6: Production-Ready Authentication API routes
+Production-Ready Authentication API routes
 
 SECURITY FEATURES:
 - Password strength validation on registration

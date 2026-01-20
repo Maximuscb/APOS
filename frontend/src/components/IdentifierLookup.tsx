@@ -1,3 +1,5 @@
+// Overview: React component for identifier lookup UI.
+
 // frontend/src/components/IdentifierLookup.tsx
 import { useState } from "react";
 import { apiGet, apiPost } from "../lib/api";

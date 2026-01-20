@@ -1,3 +1,5 @@
+## Overview: Alembic migration script template.
+
 """${message}
 
 Revision ID: ${up_revision}

@@ -1,6 +1,8 @@
+# Overview: Flask API routes for transfers operations; parses input and returns JSON responses.
+
 # backend/app/routes/transfers.py
 """
-Phase 11: Inter-store transfer API routes.
+Inter-store transfer API routes.
 """
 from flask import Blueprint, request, jsonify, g, current_app
 from app.extensions import db

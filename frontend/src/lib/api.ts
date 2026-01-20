@@ -1,3 +1,5 @@
+// Overview: API client helpers for backend requests.
+
 function getStoredToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("apos_token");

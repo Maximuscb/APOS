@@ -1,4 +1,6 @@
-"""Phase 12-14: Concurrency fields, store hierarchy/configs, reporting foundations
+# Overview: Alembic migration for 12 14 concurrency store reporting.
+
+"""Concurrency fields, store hierarchy/configs, reporting foundations
 
 Revision ID: f1a2b3c4d5e6
 Revises: abc9abff25a0

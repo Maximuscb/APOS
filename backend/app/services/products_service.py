@@ -1,3 +1,5 @@
+# Overview: Service-layer operations for products; encapsulates business logic and database work.
+
 # backend/app/services/products_service.py
 """
 Products Service with Multi-Tenant Support

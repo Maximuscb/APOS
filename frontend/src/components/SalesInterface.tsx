@@ -1,3 +1,5 @@
+// Overview: React component for sales interface UI.
+
 // frontend/src/components/SalesInterface.tsx
 import { useState } from "react";
 import { apiPost } from "../lib/api";

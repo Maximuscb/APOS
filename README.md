@@ -352,24 +352,24 @@ As of now, the system has:
 * Master ledger integration
 * Verified invariants via executable audit scripts
 
-**Phase 1: Document Lifecycle (✅ Complete)**
+**Document Lifecycle (✅ Complete)**
 * DRAFT → APPROVED → POSTED state machine
 * Only POSTED transactions affect inventory
 * Approval/posting audit trail
 * Prevents accidental posting
 
-**Phase 2: Identifier System (✅ Complete)**
+**Identifier System (✅ Complete)**
 * ProductIdentifier model (SKU, UPC, ALT_BARCODE, VENDOR_CODE)
 * Deterministic lookup with priority
 * Prevents barcode conflicts and silent mis-scans
 
-**Phase 3: Sale Documents (✅ Complete)**
+**Sale Documents (✅ Complete)**
 * Sale & SaleLine models
 * Document-first approach (not inventory-first)
 * Cart → Post workflow
 * Enables suspend/recall, quotes/estimates
 
-**Phase 4: User Authentication (✅ Basic Implementation)**
+**User Authentication (✅ Basic Implementation)**
 * User, Role, UserRole models
 * Default roles: admin, manager, cashier
 * Stub password hashing (needs bcrypt for production)
@@ -410,7 +410,7 @@ If something feels “easy,” it is probably wrong.
 
 Now that the foundational architecture is in place, here are the recommended next steps in priority order:
 
-### Phase 6: Production-Ready Authentication (HIGH PRIORITY)
+### Production-Ready Authentication (HIGH PRIORITY)
 * Replace stub password hashing with bcrypt
 * Implement proper session management with secure tokens
 * Add password strength requirements and validation
@@ -420,18 +420,18 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Why first:** The current auth system uses `STUB_HASH_password` which is explicitly insecure. This must be hardened before any production use.
 
-### Phase 7: Role-Based Permissions ✅ COMPLETE
+### Role-Based Permissions ✅ COMPLETE
 * ✅ Define permission constants (22 permissions across 5 categories)
 * ✅ Implement permission checking decorators (@require_auth, @require_permission)
 * ✅ Assign default permissions to roles (admin: 22, manager: 18, cashier: 4)
 * ✅ Add security event logging for all permission checks
 * ✅ CLI commands for permission management (grant/revoke/check)
 * ⏳ Store-scoping to user permissions (deferred to multi-store phase)
-* ⏳ Manager override workflows (deferred to Phase 8 with registers)
+* ⏳ Manager override workflows (deferred to with registers)
 
 **Implemented:** Granular RBAC with 22 permissions enforced via decorators. All checks logged to security_events table. Permission management via CLI. Example routes protected (sales, lifecycle).
 
-### ✅ Phase 8: Register Model & Session Management (COMPLETE)
+### ✅ Register Model & Session Management (COMPLETE)
 * Create Register model (device_id, location, current_user, current_shift)
 * Implement shift sign-in/sign-out with audit trail
 * Add cash drawer tracking (opening balance, transactions, closing balance)
@@ -441,7 +441,7 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Implemented:** Full register and shift management system. Registers track POS terminals with device IDs and locations. RegisterSessions provide cashier accountability with opening/closing cash and variance tracking. Cash drawer events (SHIFT_OPEN, SALE, NO_SALE, CASH_DROP, SHIFT_CLOSE) create immutable audit trail. Manager approval required for no-sale drawer opens and cash drops. Sales can now be linked to registers and sessions. CLI commands and REST API routes provided. 12 comprehensive tests passing.
 
-### ✅ Phase 9: Payment Processing (COMPLETE)
+### ✅ Payment Processing (COMPLETE)
 * Create Tender model (CASH, CARD, CHECK, etc.)
 * Create Payment model linked to Sales
 * Implement split payments and partial payments
@@ -452,7 +452,7 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Implemented:** Full payment processing system with 5 tender types (CASH, CARD, CHECK, GIFT_CARD, STORE_CREDIT). Supports split payments (multiple payments per sale), partial payments (layaway/deposits), and automatic change calculation for cash. Payment status tracking (UNPAID, PARTIAL, PAID, OVERPAID). Payment voids with immutable audit trail via PaymentTransaction ledger. Tender summary reporting for register sessions. Sales link to payments with real-time balance tracking. REST API routes with permission-based access. 14 comprehensive tests passing. **Note:** Receipt generation deferred to future phase as it's UI-dependent.
 
-### ✅ Phase 10: Returns & COGS Reversal (COMPLETE)
+### ✅ Returns & COGS Reversal (COMPLETE)
 * ✅ Create Return and ReturnLine models (PENDING → APPROVED → COMPLETED/REJECTED lifecycle)
 * ✅ Implement return workflows with manager approval requirements
 * ✅ Add COGS reversal logic (credits original `unit_cost_cents_at_sale`, NOT current WAC)
@@ -464,7 +464,7 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Implemented:** Complete return processing system with critical COGS reversal logic. When items are returned, inventory is restored with RETURN transactions (positive quantity_delta), and COGS is reversed by crediting the ORIGINAL sale cost (unit_cost_cents_at_sale) rather than current WAC. This ensures accurate profit/loss accounting even when costs change over time. Returns follow manager approval workflow (PENDING → APPROVED → COMPLETED) with full user attribution. Supports optional restocking fees. Quantity validation prevents returning more than originally purchased. Return lines reference original SaleLine for complete traceability. REST API with 8 endpoints and permission enforcement. Migration applied successfully.
 
-### ✅ Phase 11: Enhanced Inventory Operations (COMPLETE)
+### ✅ Enhanced Inventory Operations (COMPLETE)
 * ✅ Add inventory states (SELLABLE, DAMAGED, IN_TRANSIT, RESERVED) to InventoryTransaction
 * ✅ Implement transfer workflows between stores (PENDING → APPROVED → IN_TRANSIT → RECEIVED)
 * ✅ Add cycle count and full count workflows (PENDING → APPROVED → POSTED)
@@ -476,7 +476,7 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Implemented:** Complete inventory state tracking with four states (SELLABLE, DAMAGED, IN_TRANSIT, RESERVED) on all inventory transactions. Inter-store transfer system with full approval workflow (PENDING → APPROVED → IN_TRANSIT → RECEIVED), creating negative TRANSFER transactions at source (inventory_state=IN_TRANSIT) and positive at destination (inventory_state=SELLABLE). Physical count system supporting both CYCLE and FULL counts with automatic variance calculation, manager approval, and ADJUST transaction posting. Transfer and count documents follow same lifecycle pattern as other documents with full user attribution and timestamps. API routes with permission-based access (CREATE_TRANSFERS, CREATE_COUNTS, APPROVE_DOCUMENTS, POST_DOCUMENTS, VIEW_DOCUMENTS). Lot/serial tracking and expiration dates deferred as not required for core operations - can use existing ADJUST transactions for shrink/scrap scenarios. Migration applied successfully.
 
-### ⏸️ Phase 12: Concurrency Hardening (DEFERRED - Post-MVP)
+### ⏸️ Concurrency Hardening (DEFERRED - Post-MVP)
 * ⏸️ Add optimistic locking with version fields
 * ⏸️ Implement row-level locking for critical operations
 * ⏸️ Add transaction retry logic for deadlocks
@@ -485,16 +485,16 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Status:** DEFERRED to post-MVP. Current implementation has basic oversell prevention via transaction isolation and row locks. Optimistic locking and retry logic can be added after system is proven stable in production. SQLite provides adequate serialization for single-store operations.
 
-### ⏸️ Phase 13: Multi-Store Infrastructure (DEFERRED - Post-MVP)
-* ✅ All queries already use store_id filtering (implemented from Phase 1)
-* ✅ Cross-store transfers with approval (implemented in Phase 11)
+### ⏸️ Multi-Store Infrastructure (DEFERRED - Post-MVP)
+* ✅ All queries already use store_id filtering (implemented from )
+* ✅ Cross-store transfers with approval (implemented in )
 * ⏸️ Store-level configuration and settings
 * ⏸️ Create store hierarchy model (optional)
 * ⏸️ Implement consolidated reporting across stores
 
-**Status:** Core multi-store infrastructure COMPLETE. All models have store_id from day one. Inter-store transfers fully implemented in Phase 11. Store configuration and consolidated reporting deferred to post-MVP as most deployments start single-store.
+**Status:** Core multi-store infrastructure COMPLETE. All models have store_id from day one. Inter-store transfers fully implemented in . Store configuration and consolidated reporting deferred to post-MVP as most deployments start single-store.
 
-### ⏸️ Phase 14: Reporting & Analytics (DEFERRED - Post-MVP)
+### ⏸️ Reporting & Analytics (DEFERRED - Post-MVP)
 * ⏸️ Implement sales reports (daily, weekly, monthly)
 * ⏸️ Add inventory valuation reports
 * ⏸️ Create COGS and margin analysis
@@ -504,7 +504,7 @@ Now that the foundational architecture is in place, here are the recommended nex
 
 **Status:** DEFERRED to post-MVP. All data is captured in ledgers (InventoryTransaction, Sale, Payment, Return). Reports can be built on top of existing data structures without schema changes. Focus on core operations first, analytics second.
 
-### ⏸️ Phase 15: AI Integration (EXCLUDED - Not in Scope)
+### ⏸️ AI Integration (EXCLUDED - Not in Scope)
 * ⏸️ Implement AI audit ledger (all AI actions logged)
 * ⏸️ Create draft generation for receiving (invoice → draft)
 * ⏸️ Add reorder point suggestions with human approval
@@ -519,11 +519,11 @@ Now that the foundational architecture is in place, here are the recommended nex
 ## 🎯 CORE SYSTEM COMPLETE - READY FOR TESTING & DEBUGGING
 
 **Completed Phases (1-11):**
-- ✅ Phase 1-5: Foundation (stores, products, identifiers, inventory ledger, document lifecycle)
-- ✅ Phase 6-7: Authentication & Authorization (JWT sessions, role-based permissions)
-- ✅ Phase 8-9: Register Management & Payment Processing
-- ✅ Phase 10: Returns & COGS Reversal
-- ✅ Phase 11: Enhanced Inventory Operations (states, transfers, counts)
+- ✅ Foundation (stores, products, identifiers, inventory ledger, document lifecycle)
+- ✅ Authentication & Authorization (JWT sessions, role-based permissions)
+- ✅ Register Management & Payment Processing
+- ✅ Returns & COGS Reversal
+- ✅ Enhanced Inventory Operations (states, transfers, counts)
 
 **What Works:**
 - Complete inventory management with WAC costing
@@ -567,9 +567,7 @@ Now that the foundational architecture is in place, here are the recommended nex
 * **Reporting:** Basic queries only, no dashboards or analytics
 
 **Multi-Store Status:**
-* ✅ All models have store_id from Phase 1
-* ✅ Inter-store transfers implemented in Phase 11
-* ⚠️ Cross-store queries not optimized
+* ✅ All models have store_id from * ✅ Inter-store transfers implemented in * ⚠️ Cross-store queries not optimized
 * ⚠️ No store hierarchy or consolidated reporting
 
 **These gaps are intentional.** The system is structurally correct with a solid foundation. Missing features can be added incrementally without breaking the core ledger design. Test thoroughly before extending.

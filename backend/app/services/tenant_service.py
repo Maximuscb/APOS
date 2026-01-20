@@ -1,3 +1,5 @@
+# Overview: Service-layer operations for tenant; encapsulates business logic and database work.
+
 """
 Multi-Tenant Service: Tenant Validation and Scoping Helpers
 

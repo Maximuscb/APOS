@@ -1,3 +1,5 @@
+// Overview: React component for inventory ledger UI.
+
 // frontend/src/components/InventoryLedger.tsx
 import { useEffect, useMemo, useState } from "react";
 import { apiGet } from "../lib/api";

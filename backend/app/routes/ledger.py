@@ -1,3 +1,5 @@
+# Overview: Flask API routes for ledger operations; parses input and returns JSON responses.
+
 from flask import Blueprint, request, jsonify, g, current_app
 from sqlalchemy import or_, and_
 

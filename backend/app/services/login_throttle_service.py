@@ -1,3 +1,5 @@
+# Overview: Service-layer operations for login throttle; encapsulates business logic and database work.
+
 """
 Login Throttling Service
 

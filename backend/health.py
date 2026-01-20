@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Overview: Consolidated health and audit runner for backend checks.
+
 """
 Unified health and audit runner for APOS.
 
@@ -47,7 +49,7 @@ from app.permissions import PERMISSION_DEFINITIONS
 
 
 # ============================================================================
-# Phase 4: Sales and COGS snapshot tests
+# Sales and COGS snapshot tests
 # ============================================================================
 
 def run_phase4_sales_audit() -> bool:
@@ -230,7 +232,7 @@ def run_phase4_sales_audit() -> bool:
 
 
 # ============================================================================
-# Phase 5: Document lifecycle tests
+# Document lifecycle tests
 # ============================================================================
 
 def run_lifecycle_audit() -> bool:
@@ -438,7 +440,7 @@ def run_lifecycle_audit() -> bool:
 
 
 # ============================================================================
-# Phase 6: Authentication audit
+# Authentication audit
 # ============================================================================
 
 def _auth_reset_db() -> int:
@@ -798,7 +800,7 @@ def _auth_test_login_logout_flow() -> bool:
 
 def run_authentication_audit() -> bool:
     print("=" * 70)
-    print("PHASE 6: PRODUCTION-READY AUTHENTICATION AUDIT")
+    print("PRODUCTION-READY AUTHENTICATION AUDIT")
     print("=" * 70)
 
     tests = [
@@ -849,7 +851,7 @@ def run_authentication_audit() -> bool:
 
 
 # ============================================================================
-# Phase 7: Permission audit
+# Permission audit
 # ============================================================================
 
 def _perm_reset_db() -> int:
@@ -1182,7 +1184,7 @@ def _perm_test_permission_categories() -> bool:
 
 def run_permission_audit() -> bool:
     print("=" * 70)
-    print("PHASE 7: ROLE-BASED PERMISSION SYSTEM AUDIT")
+    print("ROLE-BASED PERMISSION SYSTEM AUDIT")
     print("=" * 70)
 
     tests = [

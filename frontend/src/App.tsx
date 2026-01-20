@@ -1,3 +1,5 @@
+// Overview: Top-level React component that composes the application UI.
+
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { apiDelete, apiGet, apiPost, apiPut, clearAuthToken, getAuthToken } from "./lib/api";

@@ -1,5 +1,7 @@
+# Overview: Flask API routes for sales operations; parses input and returns JSON responses.
+
 # backend/app/routes/sales.py
-"""Phase 7: Sales API routes with permission enforcement"""
+"""Sales API routes with permission enforcement"""
 
 from flask import Blueprint, request, jsonify, g
 

@@ -1,3 +1,5 @@
+# Overview: Flask API routes for inventory operations; parses input and returns JSON responses.
+
 # backend/app/routes/inventory.py
 """
 Inventory management routes.

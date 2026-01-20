@@ -1,3 +1,5 @@
+# Overview: Service-layer operations for document; encapsulates business logic and database work.
+
 from __future__ import annotations
 
 from sqlalchemy import update

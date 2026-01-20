@@ -1,3 +1,5 @@
+# Overview: Flask app factory; configures extensions, registers blueprints, and CLI.
+
 # backend/app/__init__.py
 import os
 from flask import Flask, request
@@ -26,17 +28,17 @@ def create_app() -> Flask:
     from .routes.products import products_bp
     from .routes.inventory import inventory_bp
     from .routes.ledger import ledger_bp
-    from .routes.lifecycle import lifecycle_bp  # Phase 1: Document lifecycle
-    from .routes.identifiers import identifiers_bp  # Phase 2: Identifiers
-    from .routes.sales import sales_bp  # Phase 3: Sales documents
-    from .routes.auth import auth_bp  # Phase 4: Authentication
-    from .routes.registers import registers_bp  # Phase 8: Register management
-    from .routes.payments import payments_bp  # Phase 9: Payment processing
-    from .routes.returns import returns_bp  # Phase 10: Returns & COGS reversal
-    from .routes.transfers import transfers_bp  # Phase 11: Inter-store transfers
-    from .routes.counts import counts_bp  # Phase 11: Physical counts
-    from .routes.stores import stores_bp  # Phase 13: Store management
-    from .routes.reports import reports_bp  # Phase 14: Reporting & analytics
+    from .routes.lifecycle import lifecycle_bp  # Document lifecycle
+    from .routes.identifiers import identifiers_bp  # Identifiers
+    from .routes.sales import sales_bp  # Sales documents
+    from .routes.auth import auth_bp  # Authentication
+    from .routes.registers import registers_bp  # Register management
+    from .routes.payments import payments_bp  # Payment processing
+    from .routes.returns import returns_bp  # Returns & COGS reversal
+    from .routes.transfers import transfers_bp  # Inter-store transfers
+    from .routes.counts import counts_bp  # Physical counts
+    from .routes.stores import stores_bp  # Store management
+    from .routes.reports import reports_bp  # Reporting & analytics
     from .routes.admin import admin_bp  # Admin: User and role management
 
     app.register_blueprint(system_bp)

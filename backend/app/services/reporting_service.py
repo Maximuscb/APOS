@@ -1,3 +1,5 @@
+# Overview: Service-layer operations for reporting; encapsulates business logic and database work.
+
 from __future__ import annotations
 
 from datetime import datetime

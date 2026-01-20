@@ -1,3 +1,5 @@
+# Overview: Request and permission decorators for API routes.
+
 from functools import wraps
 from flask import request, jsonify, g
 

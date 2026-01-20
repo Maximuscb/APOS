@@ -1,3 +1,5 @@
+# Overview: WSGI entrypoint that exposes the Flask app.
+
 from app import create_app
 
 app = create_app()

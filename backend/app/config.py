@@ -1,3 +1,5 @@
+# Overview: Application configuration values with environment overrides.
+
 from __future__ import annotations
 import os
 
