@@ -22,6 +22,13 @@ from app.time_utils import utcnow
 LOOKUP_PRIORITY = ["UPC", "SKU", "ALT_BARCODE", "VENDOR_CODE"]
 
 
+class AmbiguousIdentifierError(ValueError):
+    """Raised when identifier matches multiple products at the same priority."""
+    def __init__(self, matches: list[ProductIdentifier], message: str):
+        super().__init__(message)
+        self.matches = matches
+
+
 def normalize_identifier(value: str) -> str:
     """Normalize to uppercase, no spaces."""
     return value.upper().strip().replace(" ", "")
@@ -66,7 +73,8 @@ def lookup_product(value: str, vendor_id: int | None = None) -> Product | None:
         if type_matches:
             if len(type_matches) > 1:
                 # Include the type in the error message for clarity
-                raise ValueError(
+                raise AmbiguousIdentifierError(
+                    type_matches,
                     f"Ambiguous identifier: multiple {id_type} entries match value '{value}'. "
                     f"Found {len(type_matches)} matches. Please use a more specific identifier or provide vendor_id."
                 )

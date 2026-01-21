@@ -336,6 +336,90 @@ def slow_dead_stock(
     }
 
 
+def cashier_performance(
+    *,
+    store_id: int,
+    include_children: bool,
+    start: str | None,
+    end: str | None,
+) -> dict:
+    start_dt, end_dt = _parse_range(start, end)
+    store_ids = _resolve_store_ids(store_id, include_children)
+
+    sale_time = func.coalesce(Sale.completed_at, Sale.created_at)
+
+    query = db.session.query(
+        Sale.created_by_user_id.label("user_id"),
+        func.count(func.distinct(Sale.id)).label("sales_count"),
+        func.coalesce(func.sum(SaleLine.line_total_cents), 0).label("gross_sales_cents"),
+    ).join(SaleLine, SaleLine.sale_id == Sale.id).filter(
+        Sale.status == "POSTED",
+        Sale.store_id.in_(store_ids),
+    )
+
+    if start_dt:
+        query = query.filter(sale_time >= start_dt)
+    if end_dt:
+        query = query.filter(sale_time <= end_dt)
+
+    rows = query.group_by(Sale.created_by_user_id).order_by(func.sum(SaleLine.line_total_cents).desc()).all()
+    return {
+        "store_ids": store_ids,
+        "start": to_utc_z(start_dt) if start_dt else None,
+        "end": to_utc_z(end_dt) if end_dt else None,
+        "rows": [
+            {
+                "user_id": row.user_id,
+                "sales_count": int(row.sales_count or 0),
+                "gross_sales_cents": int(row.gross_sales_cents or 0),
+            }
+            for row in rows
+        ],
+    }
+
+
+def register_performance(
+    *,
+    store_id: int,
+    include_children: bool,
+    start: str | None,
+    end: str | None,
+) -> dict:
+    start_dt, end_dt = _parse_range(start, end)
+    store_ids = _resolve_store_ids(store_id, include_children)
+
+    sale_time = func.coalesce(Sale.completed_at, Sale.created_at)
+
+    query = db.session.query(
+        Sale.register_id.label("register_id"),
+        func.count(func.distinct(Sale.id)).label("sales_count"),
+        func.coalesce(func.sum(SaleLine.line_total_cents), 0).label("gross_sales_cents"),
+    ).join(SaleLine, SaleLine.sale_id == Sale.id).filter(
+        Sale.status == "POSTED",
+        Sale.store_id.in_(store_ids),
+    )
+
+    if start_dt:
+        query = query.filter(sale_time >= start_dt)
+    if end_dt:
+        query = query.filter(sale_time <= end_dt)
+
+    rows = query.group_by(Sale.register_id).order_by(func.sum(SaleLine.line_total_cents).desc()).all()
+    return {
+        "store_ids": store_ids,
+        "start": to_utc_z(start_dt) if start_dt else None,
+        "end": to_utc_z(end_dt) if end_dt else None,
+        "rows": [
+            {
+                "register_id": row.register_id,
+                "sales_count": int(row.sales_count or 0),
+                "gross_sales_cents": int(row.gross_sales_cents or 0),
+            }
+            for row in rows
+        ],
+    }
+
+
 def audit_trail(
     *,
     store_id: int | None,

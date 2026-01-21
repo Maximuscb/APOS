@@ -6,7 +6,19 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
-from ..models import DocumentSequence
+from ..models import (
+    DocumentSequence,
+    Sale,
+    ReceiveDocument,
+    InventoryTransaction,
+    Count,
+    Transfer,
+    Return,
+    Payment,
+    RegisterSession,
+    ImportBatch,
+    Register,
+)
 from .concurrency import run_with_retry
 
 
@@ -73,3 +85,214 @@ def next_document_number(
         return f"{prefix}-{store_id:03d}-{next_num:0{pad}d}"
 
     return run_with_retry(_op)
+
+
+# =============================================================================
+# Unified Documents Index
+# =============================================================================
+
+DOCUMENT_TYPES = {
+    "SALES": Sale,
+    "RECEIVES": ReceiveDocument,
+    "ADJUSTMENTS": InventoryTransaction,
+    "COUNTS": Count,
+    "TRANSFERS": Transfer,
+    "RETURNS": Return,
+    "PAYMENTS": Payment,
+    "SHIFTS": RegisterSession,
+    "IMPORTS": ImportBatch,
+}
+
+
+def _document_to_index_row(doc_type: str, doc) -> dict:
+    if doc_type == "SALES":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": doc.document_number,
+            "store_id": doc.store_id,
+            "status": doc.status,
+            "occurred_at": doc.created_at,
+            "user_id": doc.created_by_user_id,
+            "register_id": doc.register_id,
+        }
+    if doc_type == "RECEIVES":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": doc.document_number,
+            "store_id": doc.store_id,
+            "status": doc.status,
+            "occurred_at": doc.occurred_at,
+            "user_id": doc.created_by_user_id,
+            "register_id": None,
+        }
+    if doc_type == "ADJUSTMENTS":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": None,
+            "store_id": doc.store_id,
+            "status": doc.status,
+            "occurred_at": doc.occurred_at,
+            "user_id": doc.created_by_user_id,
+            "register_id": doc.register_id,
+        }
+    if doc_type == "COUNTS":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": doc.document_number,
+            "store_id": doc.store_id,
+            "status": doc.status,
+            "occurred_at": doc.created_at,
+            "user_id": doc.created_by_user_id,
+            "register_id": None,
+        }
+    if doc_type == "TRANSFERS":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": doc.document_number,
+            "store_id": doc.from_store_id,
+            "status": doc.status,
+            "occurred_at": doc.created_at,
+            "user_id": doc.created_by_user_id,
+            "register_id": None,
+        }
+    if doc_type == "RETURNS":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": doc.document_number,
+            "store_id": doc.store_id,
+            "status": doc.status,
+            "occurred_at": doc.created_at,
+            "user_id": doc.created_by_user_id,
+            "register_id": doc.register_id,
+        }
+    if doc_type == "PAYMENTS":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": None,
+            "store_id": doc.sale.store_id if doc.sale else None,
+            "status": doc.status,
+            "occurred_at": doc.created_at,
+            "user_id": doc.created_by_user_id,
+            "register_id": doc.register_id,
+        }
+    if doc_type == "SHIFTS":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": None,
+            "store_id": doc.register.store_id if doc.register else None,
+            "status": doc.status,
+            "occurred_at": doc.opened_at,
+            "user_id": doc.user_id,
+            "register_id": doc.register_id,
+        }
+    if doc_type == "IMPORTS":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": None,
+            "store_id": None,
+            "status": doc.status,
+            "occurred_at": doc.created_at,
+            "user_id": doc.created_by_user_id,
+            "register_id": None,
+        }
+    return {
+        "id": doc.id,
+        "type": doc_type,
+        "document_number": None,
+        "store_id": getattr(doc, "store_id", None),
+        "status": getattr(doc, "status", None),
+        "occurred_at": getattr(doc, "created_at", None),
+        "user_id": getattr(doc, "created_by_user_id", None),
+        "register_id": getattr(doc, "register_id", None),
+    }
+
+
+def list_documents(
+    *,
+    store_id: int | None = None,
+    store_ids: list[int] | None = None,
+    doc_type: str | None = None,
+    from_date=None,
+    to_date=None,
+    user_id: int | None = None,
+    register_id: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """
+    List documents across types with common filters.
+    """
+    types = [doc_type] if doc_type else list(DOCUMENT_TYPES.keys())
+    rows: list[dict] = []
+
+    for dtype in types:
+        model = DOCUMENT_TYPES.get(dtype)
+        if not model:
+            continue
+
+        query = db.session.query(model)
+
+        if dtype == "ADJUSTMENTS":
+            query = query.filter(model.type == "ADJUST")
+
+        effective_store_ids = store_ids if store_ids is not None else ([store_id] if store_id else None)
+
+        if dtype == "TRANSFERS" and effective_store_ids:
+            query = query.filter(model.from_store_id.in_(effective_store_ids))
+        elif dtype == "PAYMENTS" and effective_store_ids:
+            query = query.join(Sale, Sale.id == model.sale_id).filter(Sale.store_id.in_(effective_store_ids))
+        elif dtype == "SHIFTS" and effective_store_ids:
+            query = query.filter(model.register_id.isnot(None)).join(
+                Register, Register.id == model.register_id
+            ).filter(Register.store_id.in_(effective_store_ids))
+        elif effective_store_ids and hasattr(model, "store_id"):
+            query = query.filter(model.store_id.in_(effective_store_ids))
+
+        if user_id and hasattr(model, "created_by_user_id"):
+            query = query.filter(model.created_by_user_id == user_id)
+        if register_id and hasattr(model, "register_id"):
+            query = query.filter(model.register_id == register_id)
+
+        if from_date and hasattr(model, "created_at"):
+            query = query.filter(model.created_at >= from_date)
+        if to_date and hasattr(model, "created_at"):
+            query = query.filter(model.created_at <= to_date)
+
+        docs = query.order_by(model.id.desc()).all()
+        rows.extend([_document_to_index_row(dtype, doc) for doc in docs])
+
+    rows.sort(key=lambda r: r.get("occurred_at") or r.get("id"), reverse=True)
+    total = len(rows)
+
+    if offset < 0:
+        offset = 0
+    if limit < 1:
+        limit = 1
+    if limit > 500:
+        limit = 500
+
+    return rows[offset: offset + limit], total
+
+
+def get_document(doc_type: str, doc_id: int) -> dict | None:
+    model = DOCUMENT_TYPES.get(doc_type)
+    if not model:
+        return None
+
+    doc = db.session.query(model).filter_by(id=doc_id).first()
+    if not doc:
+        return None
+
+    if hasattr(doc, "to_dict"):
+        return doc.to_dict()
+
+    return _document_to_index_row(doc_type, doc)

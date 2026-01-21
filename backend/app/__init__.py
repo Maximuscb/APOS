@@ -40,6 +40,12 @@ def create_app() -> Flask:
     from .routes.stores import stores_bp  # Store management
     from .routes.reports import reports_bp  # Reporting & analytics
     from .routes.admin import admin_bp  # Admin: User and role management
+    from .routes.vendors import vendors_bp  # Vendor management
+    from .routes.receives import receives_bp  # Receive documents (replaces inventory/receive)
+    from .routes.timekeeping import timekeeping_bp  # Timekeeping
+    from .routes.documents import documents_bp  # Unified documents
+    from .routes.analytics import analytics_bp  # Analytics
+    from .routes.imports import imports_bp  # Imports
 
     app.register_blueprint(system_bp)
     app.register_blueprint(products_bp)
@@ -57,6 +63,12 @@ def create_app() -> Flask:
     app.register_blueprint(stores_bp)
     app.register_blueprint(reports_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(vendors_bp)
+    app.register_blueprint(receives_bp)
+    app.register_blueprint(timekeeping_bp)
+    app.register_blueprint(documents_bp)
+    app.register_blueprint(analytics_bp)
+    app.register_blueprint(imports_bp)
 
     @app.after_request
     def add_cors_headers(response):

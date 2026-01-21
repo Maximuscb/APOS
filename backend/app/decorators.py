@@ -134,21 +134,19 @@ def require_any_permission(*permission_codes):
             user_permissions = permission_service.get_user_permissions(user.id)
             has_any = any(code in user_permissions for code in permission_codes)
 
-            # Log the check with tenant context
-            permission_service.log_security_event(
-                user_id=user.id,
-                event_type="PERMISSION_DENIED" if not has_any else "PERMISSION_GRANTED",
-                success=has_any,
-                resource=resource,
-                action=f"ANY_OF:{','.join(permission_codes)}",
-                reason=None if has_any else f"Missing any of: {', '.join(permission_codes)}",
-                ip_address=ip_address,
-                user_agent=user_agent,
-                org_id=g.org_id,
-                store_id=g.store_id
-            )
-
             if not has_any:
+                permission_service.log_security_event(
+                    user_id=user.id,
+                    event_type="PERMISSION_DENIED",
+                    success=False,
+                    resource=resource,
+                    action=f"ANY_OF:{','.join(permission_codes)}",
+                    reason=f"Missing any of: {', '.join(permission_codes)}",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    org_id=g.org_id,
+                    store_id=g.store_id
+                )
                 return jsonify({
                     "error": "Permission denied",
                     "required_permissions": list(permission_codes),
@@ -183,21 +181,19 @@ def require_all_permissions(*permission_codes):
             has_all = all(code in user_permissions for code in permission_codes)
             missing = [code for code in permission_codes if code not in user_permissions]
 
-            # Log the check with tenant context
-            permission_service.log_security_event(
-                user_id=user.id,
-                event_type="PERMISSION_DENIED" if not has_all else "PERMISSION_GRANTED",
-                success=has_all,
-                resource=resource,
-                action=f"ALL_OF:{','.join(permission_codes)}",
-                reason=None if has_all else f"Missing: {', '.join(missing)}",
-                ip_address=ip_address,
-                user_agent=user_agent,
-                org_id=g.org_id,
-                store_id=g.store_id
-            )
-
             if not has_all:
+                permission_service.log_security_event(
+                    user_id=user.id,
+                    event_type="PERMISSION_DENIED",
+                    success=False,
+                    resource=resource,
+                    action=f"ALL_OF:{','.join(permission_codes)}",
+                    reason=f"Missing: {', '.join(missing)}",
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    org_id=g.org_id,
+                    store_id=g.store_id
+                )
                 return jsonify({
                     "error": "Permission denied",
                     "required_permissions": list(permission_codes),

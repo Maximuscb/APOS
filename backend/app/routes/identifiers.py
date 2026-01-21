@@ -13,6 +13,7 @@ SECURITY: All routes require authentication.
 from flask import Blueprint, request, jsonify, current_app
 
 from ..services import identifier_service
+from ..services.identifier_service import AmbiguousIdentifierError
 from ..decorators import require_auth, require_permission
 
 
@@ -37,6 +38,13 @@ def lookup_product_route(value: str):
 
         return jsonify({"product": product.to_dict()}), 200
 
+    except AmbiguousIdentifierError as e:
+        products = [m.product.to_dict() for m in e.matches]
+        return jsonify({
+            "error": str(e),
+            "ambiguous": True,
+            "products": products,
+        }), 409
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception:

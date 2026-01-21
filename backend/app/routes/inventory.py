@@ -6,7 +6,6 @@ Inventory management routes.
 
 SECURITY: All routes require authentication.
 - View operations require VIEW_INVENTORY permission
-- Receive operations require RECEIVE_INVENTORY permission
 - Adjust operations require ADJUST_INVENTORY permission
 - Sale operations require CREATE_SALE permission (called internally)
 
@@ -22,7 +21,6 @@ from ..validation import (
     ModelValidationPolicy,
     validate_payload,
     ValidationError,
-    enforce_rules_inventory_receive,
     enforce_rules_inventory_adjust,
     enforce_rules_inventory_sale,
 )
@@ -30,11 +28,6 @@ from ..decorators import require_auth, require_permission
 
 
 inventory_bp = Blueprint("inventory", __name__, url_prefix="/api/inventory")
-
-INVENTORY_RECEIVE_POLICY = ModelValidationPolicy(
-    writable_fields={"store_id", "product_id", "quantity_delta", "unit_cost_cents", "occurred_at", "note"},
-    required_on_create={"store_id", "product_id", "quantity_delta", "unit_cost_cents"},
-)
 
 INVENTORY_ADJUST_POLICY = ModelValidationPolicy(
     writable_fields={"store_id", "product_id", "quantity_delta", "occurred_at", "note"},
@@ -53,46 +46,6 @@ INVENTORY_SALE_POLICY = ModelValidationPolicy(
     },
     required_on_create={"store_id", "product_id", "quantity_delta", "sale_id", "sale_line_id"},
 )
-
-
-@inventory_bp.post("/receive")
-@require_auth
-@require_permission("RECEIVE_INVENTORY")
-def receive_inventory_route():
-    """
-    Receive inventory into stock.
-
-    Requires RECEIVE_INVENTORY permission.
-    """
-    payload = request.get_json(silent=True) or {}
-
-    try:
-        patch = validate_payload(
-            model=InventoryTransaction,
-            payload=payload,
-            policy=INVENTORY_RECEIVE_POLICY,
-            partial=False,
-        )
-        enforce_rules_inventory_receive(patch)
-    except ValidationError as e:
-        return {"error": str(e)}, 400
-
-    from ..services.inventory_service import receive_inventory, get_inventory_summary
-
-    try:
-        created_tx = receive_inventory(
-            store_id=patch["store_id"],
-            product_id=patch["product_id"],
-            quantity=patch["quantity_delta"],
-            unit_cost_cents=patch["unit_cost_cents"],
-            occurred_at=patch.get("occurred_at"),
-            note=patch.get("note"),
-        )
-    except ValueError as e:
-        return {"error": str(e)}, 400
-
-    summary = get_inventory_summary(store_id=patch["store_id"], product_id=patch["product_id"])
-    return {"transaction": created_tx.to_dict(), "summary": summary}, 201
 
 
 @inventory_bp.post("/adjust")

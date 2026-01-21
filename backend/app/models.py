@@ -1318,6 +1318,10 @@ class User(db.Model):
     # Bcrypt hashed password
     password_hash = db.Column(db.String(255), nullable=False)
 
+    # Optional 6-digit PIN for Register Mode login (bcrypt hashed)
+    # PINs are org-wide per user; PIN login grants full Register Mode access
+    pin_hash = db.Column(db.String(255), nullable=True)
+
     # Store association (nullable for org-level users)
     store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=True)
 
@@ -1704,4 +1708,737 @@ class DocumentSequence(db.Model):
             "document_type": self.document_type,
             "next_number": self.next_number,
             "updated_at": to_utc_z(self.updated_at),
+        }
+
+
+# =============================================================================
+# VENDOR ENTITY
+# =============================================================================
+
+class Vendor(db.Model):
+    """
+    First-class Vendor entity for inventory receiving.
+
+    MULTI-TENANT: Vendors are scoped to organizations via org_id.
+    Vendor codes are unique within an organization when specified.
+
+    WHY: Every inventory receive must have exactly one vendor, regardless
+    of source (purchase, donation, found stock, etc.). This provides
+    traceability and supports vendor-specific analytics.
+
+    DESIGN:
+    - Products may be sourced from multiple vendors (no required join)
+    - Vendor-product relationships are implicit via ReceiveDocument history
+    - Vendor is stored on receive document header, not per line item
+    """
+    __tablename__ = "vendors"
+    __table_args__ = (
+        db.UniqueConstraint("org_id", "code", name="uq_vendors_org_code"),
+        db.Index("ix_vendors_org_id", "org_id"),
+        db.Index("ix_vendors_org_active", "org_id", "is_active"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+
+    name = db.Column(db.String(255), nullable=False)
+    code = db.Column(db.String(64), nullable=True, index=True)  # Optional short code for quick lookup
+
+    # Contact information
+    contact_name = db.Column(db.String(255), nullable=True)
+    contact_email = db.Column(db.String(255), nullable=True)
+    contact_phone = db.Column(db.String(64), nullable=True)
+    address = db.Column(db.Text, nullable=True)
+
+    # Status
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+
+    # Notes and metadata
+    notes = db.Column(db.Text, nullable=True)
+
+    # Audit fields
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
+    version_id = db.Column(db.Integer, nullable=False, default=1)
+
+    organization = db.relationship("Organization", backref=db.backref("vendors", lazy=True))
+    __mapper_args__ = {"version_id_col": version_id}
+
+    def __repr__(self) -> str:
+        return f"<Vendor id={self.id} name={self.name!r} org_id={self.org_id}>"
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "org_id": self.org_id,
+            "name": self.name,
+            "code": self.code,
+            "contact_name": self.contact_name,
+            "contact_email": self.contact_email,
+            "contact_phone": self.contact_phone,
+            "address": self.address,
+            "is_active": self.is_active,
+            "notes": self.notes,
+            "created_at": to_utc_z(self.created_at),
+            "updated_at": to_utc_z(self.updated_at),
+            "version_id": self.version_id,
+        }
+
+
+# =============================================================================
+# RECEIVE DOCUMENT (Document-First Inventory Receiving)
+# =============================================================================
+
+class ReceiveDocument(db.Model):
+    """
+    Inventory receive document with required vendor.
+
+    WHY: Every inventory receive must require exactly one vendor, regardless
+    of source. This is the document header; line items are in ReceiveDocumentLine.
+
+    LIFECYCLE:
+    1. DRAFT: Created, lines being added
+    2. APPROVED: Manager approved, ready to post
+    3. POSTED: Posted to inventory ledger (creates InventoryTransactions)
+    4. CANCELLED: Cancelled before posting
+
+    IMMUTABLE: Once POSTED, document cannot be modified. Corrections require
+    new documents (adjustments, voids).
+
+    DESIGN:
+    - Vendor is REQUIRED on the document header, not per line
+    - receive_type tracks source: PURCHASE, DONATION, FOUND, TRANSFER_IN, OTHER
+    - Document number follows standard format: RCV-{store}-{number}
+    """
+    __tablename__ = "receive_documents"
+    __table_args__ = (
+        db.UniqueConstraint("store_id", "document_number", name="uq_receive_docs_store_docnum"),
+        db.Index("ix_receive_docs_document_number", "document_number"),
+        db.Index("ix_receive_docs_store_status", "store_id", "status"),
+        db.Index("ix_receive_docs_vendor", "vendor_id"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
+
+    # REQUIRED: Every receive must have a vendor
+    vendor_id = db.Column(db.Integer, db.ForeignKey("vendors.id"), nullable=False, index=True)
+
+    # Human-readable document number (e.g., "RCV-001-0042")
+    document_number = db.Column(db.String(64), nullable=False)
+
+    # Source type: PURCHASE, DONATION, FOUND, TRANSFER_IN, OTHER
+    receive_type = db.Column(db.String(32), nullable=False, index=True)
+
+    # Document lifecycle status
+    status = db.Column(db.String(16), nullable=False, default="DRAFT", index=True)
+
+    # Business date/time of the receive
+    occurred_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    # Notes
+    notes = db.Column(db.Text, nullable=True)
+
+    # Reference number (PO number, invoice number, etc.)
+    reference_number = db.Column(db.String(128), nullable=True)
+
+    # Lifecycle user attribution
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    approved_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    posted_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    cancelled_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    # Lifecycle timestamps
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    approved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    posted_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    cancelled_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Cancellation reason
+    cancellation_reason = db.Column(db.Text, nullable=True)
+
+    version_id = db.Column(db.Integer, nullable=False, default=1)
+
+    # Relationships
+    store = db.relationship("Store", backref=db.backref("receive_documents", lazy=True))
+    vendor = db.relationship("Vendor", backref=db.backref("receive_documents", lazy=True))
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
+    posted_by = db.relationship("User", foreign_keys=[posted_by_user_id])
+    cancelled_by = db.relationship("User", foreign_keys=[cancelled_by_user_id])
+
+    __mapper_args__ = {"version_id_col": version_id}
+
+    def __repr__(self) -> str:
+        return f"<ReceiveDocument id={self.id} doc_num={self.document_number!r} status={self.status}>"
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "store_id": self.store_id,
+            "vendor_id": self.vendor_id,
+            "document_number": self.document_number,
+            "receive_type": self.receive_type,
+            "status": self.status,
+            "occurred_at": to_utc_z(self.occurred_at),
+            "notes": self.notes,
+            "reference_number": self.reference_number,
+            "created_by_user_id": self.created_by_user_id,
+            "approved_by_user_id": self.approved_by_user_id,
+            "posted_by_user_id": self.posted_by_user_id,
+            "cancelled_by_user_id": self.cancelled_by_user_id,
+            "created_at": to_utc_z(self.created_at),
+            "approved_at": to_utc_z(self.approved_at) if self.approved_at else None,
+            "posted_at": to_utc_z(self.posted_at) if self.posted_at else None,
+            "cancelled_at": to_utc_z(self.cancelled_at) if self.cancelled_at else None,
+            "cancellation_reason": self.cancellation_reason,
+            "version_id": self.version_id,
+        }
+
+
+class ReceiveDocumentLine(db.Model):
+    """
+    Individual line items on a receive document.
+
+    WHY: Track which products and quantities are being received.
+    Links to InventoryTransaction when document is posted.
+    """
+    __tablename__ = "receive_document_lines"
+    __table_args__ = (
+        db.UniqueConstraint("receive_document_id", "product_id", name="uq_receive_lines_doc_product"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    receive_document_id = db.Column(db.Integer, db.ForeignKey("receive_documents.id"), nullable=False, index=True)
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False, index=True)
+
+    # Quantity received (always positive)
+    quantity = db.Column(db.Integer, nullable=False)
+
+    # Unit cost in cents (required for COGS calculation)
+    unit_cost_cents = db.Column(db.Integer, nullable=False)
+
+    # Line total (quantity * unit_cost_cents)
+    line_cost_cents = db.Column(db.Integer, nullable=False)
+
+    # Optional notes for this line
+    note = db.Column(db.String(255), nullable=True)
+
+    # Link to inventory transaction (created when document is posted)
+    inventory_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    version_id = db.Column(db.Integer, nullable=False, default=1)
+
+    # Relationships
+    receive_document = db.relationship("ReceiveDocument", backref=db.backref("lines", lazy=True))
+    product = db.relationship("Product")
+    inventory_transaction = db.relationship("InventoryTransaction")
+
+    __mapper_args__ = {"version_id_col": version_id}
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "receive_document_id": self.receive_document_id,
+            "product_id": self.product_id,
+            "quantity": self.quantity,
+            "unit_cost_cents": self.unit_cost_cents,
+            "line_cost_cents": self.line_cost_cents,
+            "note": self.note,
+            "inventory_transaction_id": self.inventory_transaction_id,
+            "created_at": to_utc_z(self.created_at),
+            "version_id": self.version_id,
+        }
+
+
+# =============================================================================
+# USER PERMISSION OVERRIDES
+# =============================================================================
+
+class UserPermissionOverride(db.Model):
+    """
+    Per-user permission overrides (grant or deny).
+
+    WHY: Role-based permissions don't cover all cases. Sometimes a specific
+    user needs elevated access or restricted access beyond their role.
+
+    DESIGN:
+    - Overrides are org-wide per user (not store-scoped)
+    - override_type: GRANT (add permission) or DENY (remove permission)
+    - Overrides take precedence over role-based permissions
+    - DENY overrides take precedence over GRANT overrides
+    - Admin permissions cannot be altered via overrides (protected)
+
+    AUDIT:
+    - Tracks who granted the override and when
+    - Reason field for compliance documentation
+    """
+    __tablename__ = "user_permission_overrides"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "permission_code", name="uq_user_perm_override"),
+        db.Index("ix_user_perm_overrides_user", "user_id"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+
+    # Permission code (must match valid Permission.code)
+    permission_code = db.Column(db.String(64), nullable=False, index=True)
+
+    # GRANT or DENY
+    override_type = db.Column(db.String(8), nullable=False)
+
+    # Who granted this override
+    granted_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+
+    # When it was granted
+    granted_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    # Reason for the override (compliance)
+    reason = db.Column(db.Text, nullable=True)
+
+    # Active status (allows soft-delete of overrides)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+
+    # Revocation tracking
+    revoked_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    revoked_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    revocation_reason = db.Column(db.Text, nullable=True)
+
+    # Relationships
+    user = db.relationship("User", foreign_keys=[user_id], backref=db.backref("permission_overrides", lazy=True))
+    granted_by = db.relationship("User", foreign_keys=[granted_by_user_id])
+    revoked_by = db.relationship("User", foreign_keys=[revoked_by_user_id])
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "permission_code": self.permission_code,
+            "override_type": self.override_type,
+            "granted_by_user_id": self.granted_by_user_id,
+            "granted_at": to_utc_z(self.granted_at),
+            "reason": self.reason,
+            "is_active": self.is_active,
+            "revoked_by_user_id": self.revoked_by_user_id,
+            "revoked_at": to_utc_z(self.revoked_at) if self.revoked_at else None,
+            "revocation_reason": self.revocation_reason,
+        }
+
+
+# =============================================================================
+# TIMEKEEPING (Shift-Based Clock In/Out)
+# =============================================================================
+
+class TimeClockEntry(db.Model):
+    """
+    Time clock entry for shift-based timekeeping.
+
+    WHY: Employees need to clock in/out. Shifts are the unit of accountability.
+
+    LIFECYCLE:
+    - OPEN: Clock-in happened, shift in progress
+    - CLOSED: Clock-out happened, shift complete
+
+    IMMUTABLE: Once CLOSED, entry cannot be modified. Corrections are
+    handled via append-only TimeClockCorrection records requiring manager approval.
+
+    DESIGN:
+    - Clock-in/out occurs in Register Mode
+    - Timekeeping analytics/admin occurs in Operations Suite
+    - Optional linking to RegisterSession for cross-reference
+    """
+    __tablename__ = "time_clock_entries"
+    __table_args__ = (
+        db.Index("ix_time_clock_user_status", "user_id", "status"),
+        db.Index("ix_time_clock_store_date", "store_id", "clock_in_at"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
+
+    # Clock times
+    clock_in_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    clock_out_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Status: OPEN (clocked in), CLOSED (clocked out)
+    status = db.Column(db.String(16), nullable=False, default="OPEN", index=True)
+
+    # Total worked time in minutes (calculated on clock-out, excludes breaks)
+    total_worked_minutes = db.Column(db.Integer, nullable=True)
+
+    # Total break time in minutes (sum of breaks)
+    total_break_minutes = db.Column(db.Integer, nullable=True, default=0)
+
+    # Optional link to register session
+    register_session_id = db.Column(db.Integer, db.ForeignKey("register_sessions.id"), nullable=True, index=True)
+
+    # Notes
+    notes = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    version_id = db.Column(db.Integer, nullable=False, default=1)
+
+    # Relationships
+    user = db.relationship("User", backref=db.backref("time_clock_entries", lazy=True))
+    store = db.relationship("Store", backref=db.backref("time_clock_entries", lazy=True))
+    register_session = db.relationship("RegisterSession", backref=db.backref("time_clock_entries", lazy=True))
+
+    __mapper_args__ = {"version_id_col": version_id}
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "store_id": self.store_id,
+            "clock_in_at": to_utc_z(self.clock_in_at),
+            "clock_out_at": to_utc_z(self.clock_out_at) if self.clock_out_at else None,
+            "status": self.status,
+            "total_worked_minutes": self.total_worked_minutes,
+            "total_break_minutes": self.total_break_minutes,
+            "register_session_id": self.register_session_id,
+            "notes": self.notes,
+            "created_at": to_utc_z(self.created_at),
+            "version_id": self.version_id,
+        }
+
+
+class TimeClockBreak(db.Model):
+    """
+    Break periods within a time clock entry.
+
+    WHY: Track break start/end times separately for accurate work time calculation.
+    """
+    __tablename__ = "time_clock_breaks"
+    __table_args__ = (
+        db.Index("ix_time_clock_breaks_entry", "time_clock_entry_id"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    time_clock_entry_id = db.Column(db.Integer, db.ForeignKey("time_clock_entries.id"), nullable=False, index=True)
+
+    # Break times
+    start_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    end_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Break type: PAID, UNPAID
+    break_type = db.Column(db.String(16), nullable=False, default="UNPAID")
+
+    # Duration in minutes (calculated on end)
+    duration_minutes = db.Column(db.Integer, nullable=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    # Relationships
+    time_clock_entry = db.relationship("TimeClockEntry", backref=db.backref("breaks", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "time_clock_entry_id": self.time_clock_entry_id,
+            "start_at": to_utc_z(self.start_at),
+            "end_at": to_utc_z(self.end_at) if self.end_at else None,
+            "break_type": self.break_type,
+            "duration_minutes": self.duration_minutes,
+            "created_at": to_utc_z(self.created_at),
+        }
+
+
+class TimeClockCorrection(db.Model):
+    """
+    Append-only correction records for time clock entries.
+
+    WHY: Shifts are immutable once closed. Corrections must be documented
+    and require manager approval for compliance.
+
+    DESIGN:
+    - Each correction is a separate record (append-only)
+    - Manager approval required before correction is applied
+    - Original entry remains unchanged; correction stores adjusted values
+    - Multiple corrections can exist for same entry (only latest approved applies)
+    """
+    __tablename__ = "time_clock_corrections"
+    __table_args__ = (
+        db.Index("ix_time_clock_corrections_entry", "time_clock_entry_id"),
+        db.Index("ix_time_clock_corrections_status", "status"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    time_clock_entry_id = db.Column(db.Integer, db.ForeignKey("time_clock_entries.id"), nullable=False, index=True)
+
+    # Original values (for audit trail)
+    original_clock_in_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    original_clock_out_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Corrected values
+    corrected_clock_in_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    corrected_clock_out_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Reason for correction (required)
+    reason = db.Column(db.Text, nullable=False)
+
+    # Who submitted the correction
+    submitted_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    submitted_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    # Approval status: PENDING, APPROVED, REJECTED
+    status = db.Column(db.String(16), nullable=False, default="PENDING", index=True)
+
+    # Manager approval
+    approved_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    approval_notes = db.Column(db.Text, nullable=True)
+
+    # Relationships
+    time_clock_entry = db.relationship("TimeClockEntry", backref=db.backref("corrections", lazy=True))
+    submitted_by = db.relationship("User", foreign_keys=[submitted_by_user_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_user_id])
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "time_clock_entry_id": self.time_clock_entry_id,
+            "original_clock_in_at": to_utc_z(self.original_clock_in_at),
+            "original_clock_out_at": to_utc_z(self.original_clock_out_at) if self.original_clock_out_at else None,
+            "corrected_clock_in_at": to_utc_z(self.corrected_clock_in_at),
+            "corrected_clock_out_at": to_utc_z(self.corrected_clock_out_at) if self.corrected_clock_out_at else None,
+            "reason": self.reason,
+            "submitted_by_user_id": self.submitted_by_user_id,
+            "submitted_at": to_utc_z(self.submitted_at),
+            "status": self.status,
+            "approved_by_user_id": self.approved_by_user_id,
+            "approved_at": to_utc_z(self.approved_at) if self.approved_at else None,
+            "approval_notes": self.approval_notes,
+        }
+
+
+# =============================================================================
+# IMPORT STAGING (Enterprise-Scale Onboarding)
+# =============================================================================
+
+class ImportBatch(db.Model):
+    """
+    Import batch for staging and progressively posting data.
+
+    WHY: Enterprise businesses have thousands of products and millions of sales.
+    Imports must be resumable, chunked, idempotent, and asynchronous.
+
+    LIFECYCLE:
+    1. CREATED: Batch created, awaiting data upload
+    2. STAGED: Raw data ingested into staging tables
+    3. MAPPING: Assisted mapping in progress (unmapped entities detected)
+    4. POSTING: Posting resolvable rows progressively
+    5. COMPLETED: All rows posted or quarantined
+    6. FAILED: Unrecoverable error
+
+    DESIGN:
+    - Nothing posts to real documents/ledgers initially
+    - System detects unmapped products/users/registers
+    - Provides mapping UI and bulk tools
+    - Cannot fully post until references resolved
+    - Foreign IDs preserved as metadata for traceability
+    """
+    __tablename__ = "import_batches"
+    __table_args__ = (
+        db.Index("ix_import_batches_org_status", "org_id", "status"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+
+    # Import type: PRODUCTS, SALES, INVENTORY, CUSTOMERS, etc.
+    import_type = db.Column(db.String(32), nullable=False, index=True)
+
+    # Batch status
+    status = db.Column(db.String(16), nullable=False, default="CREATED", index=True)
+
+    # Source file information
+    source_file_name = db.Column(db.String(255), nullable=True)
+    source_file_format = db.Column(db.String(16), nullable=True)  # CSV, JSON, EXCEL
+
+    # Row counts
+    total_rows = db.Column(db.Integer, nullable=True)
+    staged_rows = db.Column(db.Integer, nullable=True, default=0)
+    mapped_rows = db.Column(db.Integer, nullable=True, default=0)
+    posted_rows = db.Column(db.Integer, nullable=True, default=0)
+    error_rows = db.Column(db.Integer, nullable=True, default=0)
+    quarantined_rows = db.Column(db.Integer, nullable=True, default=0)
+
+    # Progress tracking for resumability
+    last_processed_row = db.Column(db.Integer, nullable=True, default=0)
+
+    # Error message if FAILED
+    error_message = db.Column(db.Text, nullable=True)
+
+    # User attribution
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    started_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    completed_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    version_id = db.Column(db.Integer, nullable=False, default=1)
+
+    # Relationships
+    organization = db.relationship("Organization", backref=db.backref("import_batches", lazy=True))
+    created_by = db.relationship("User", foreign_keys=[created_by_user_id])
+
+    __mapper_args__ = {"version_id_col": version_id}
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "org_id": self.org_id,
+            "import_type": self.import_type,
+            "status": self.status,
+            "source_file_name": self.source_file_name,
+            "source_file_format": self.source_file_format,
+            "total_rows": self.total_rows,
+            "staged_rows": self.staged_rows,
+            "mapped_rows": self.mapped_rows,
+            "posted_rows": self.posted_rows,
+            "error_rows": self.error_rows,
+            "quarantined_rows": self.quarantined_rows,
+            "last_processed_row": self.last_processed_row,
+            "error_message": self.error_message,
+            "created_by_user_id": self.created_by_user_id,
+            "created_at": to_utc_z(self.created_at),
+            "started_at": to_utc_z(self.started_at) if self.started_at else None,
+            "completed_at": to_utc_z(self.completed_at) if self.completed_at else None,
+            "version_id": self.version_id,
+        }
+
+
+class ImportStagingRow(db.Model):
+    """
+    Individual staged row from an import batch.
+
+    WHY: Raw data goes into staging first. Each row tracks its mapping
+    and posting status separately for progressive processing.
+
+    DESIGN:
+    - raw_data stores the original JSON-serialized row
+    - foreign_id preserves the original ID from source system
+    - mapping_status tracks whether references are resolved
+    - posted_entity_id links to the created entity after posting
+    """
+    __tablename__ = "import_staging_rows"
+    __table_args__ = (
+        db.Index("ix_import_staging_batch_status", "batch_id", "mapping_status"),
+        db.Index("ix_import_staging_batch_row", "batch_id", "row_number"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey("import_batches.id"), nullable=False, index=True)
+
+    # Row position in original file (for error reporting)
+    row_number = db.Column(db.Integer, nullable=False)
+
+    # Raw data as JSON string
+    raw_data = db.Column(db.Text, nullable=False)
+
+    # Original ID from source system (preserved for traceability)
+    foreign_id = db.Column(db.String(128), nullable=True, index=True)
+
+    # Mapping status: PENDING, MAPPED, UNMAPPED, ERROR
+    mapping_status = db.Column(db.String(16), nullable=False, default="PENDING", index=True)
+
+    # Posting status: PENDING, POSTED, QUARANTINED, ERROR
+    posting_status = db.Column(db.String(16), nullable=False, default="PENDING", index=True)
+
+    # Validation/mapping errors
+    error_message = db.Column(db.Text, nullable=True)
+
+    # Unmapped references (JSON array of {field, value, entity_type})
+    unmapped_references = db.Column(db.Text, nullable=True)
+
+    # After posting, link to created entity
+    posted_entity_type = db.Column(db.String(64), nullable=True)
+    posted_entity_id = db.Column(db.Integer, nullable=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    posted_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    batch = db.relationship("ImportBatch", backref=db.backref("staging_rows", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "batch_id": self.batch_id,
+            "row_number": self.row_number,
+            "raw_data": self.raw_data,
+            "foreign_id": self.foreign_id,
+            "mapping_status": self.mapping_status,
+            "posting_status": self.posting_status,
+            "error_message": self.error_message,
+            "unmapped_references": self.unmapped_references,
+            "posted_entity_type": self.posted_entity_type,
+            "posted_entity_id": self.posted_entity_id,
+            "created_at": to_utc_z(self.created_at),
+            "posted_at": to_utc_z(self.posted_at) if self.posted_at else None,
+        }
+
+
+class ImportEntityMapping(db.Model):
+    """
+    Entity mappings for import batches.
+
+    WHY: When importing data, foreign IDs from the source system need
+    to be mapped to local entity IDs. This table stores those mappings.
+    """
+    __tablename__ = "import_entity_mappings"
+    __table_args__ = (
+        db.UniqueConstraint("batch_id", "entity_type", "foreign_id", name="uq_import_mapping"),
+        db.Index("ix_import_mapping_batch_entity", "batch_id", "entity_type"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey("import_batches.id"), nullable=False, index=True)
+
+    # Entity type: PRODUCT, USER, REGISTER, STORE, VENDOR, etc.
+    entity_type = db.Column(db.String(32), nullable=False)
+
+    # Foreign ID from source system
+    foreign_id = db.Column(db.String(128), nullable=False)
+
+    # Local entity ID (after mapping)
+    local_entity_id = db.Column(db.Integer, nullable=True)
+
+    # Mapping status: PENDING, MAPPED, SKIPPED, CREATE_NEW
+    status = db.Column(db.String(16), nullable=False, default="PENDING")
+
+    # If CREATE_NEW, store the data for creation
+    creation_data = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    mapped_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    batch = db.relationship("ImportBatch", backref=db.backref("entity_mappings", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "batch_id": self.batch_id,
+            "entity_type": self.entity_type,
+            "foreign_id": self.foreign_id,
+            "local_entity_id": self.local_entity_id,
+            "status": self.status,
+            "creation_data": self.creation_data,
+            "created_at": to_utc_z(self.created_at),
+            "mapped_at": to_utc_z(self.mapped_at) if self.mapped_at else None,
         }

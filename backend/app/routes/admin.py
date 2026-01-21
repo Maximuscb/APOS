@@ -15,7 +15,7 @@ All endpoints require authentication and appropriate permissions.
 from flask import Blueprint, request, jsonify, g, current_app
 
 from ..extensions import db
-from ..models import User, Role, UserRole, Permission, RolePermission
+from ..models import User, Role, UserRole, Permission, RolePermission, UserPermissionOverride
 from ..services import auth_service, session_service, permission_service
 from ..services.auth_service import PasswordValidationError
 from ..decorators import require_auth, require_permission, require_any_permission
@@ -89,8 +89,10 @@ def get_user(user_id: int):
             role_names.append(role.name)
     user_dict["roles"] = role_names
 
-    # Add permissions
+    # Add permissions and overrides
     user_dict["permissions"] = list(permission_service.get_user_permissions(user.id))
+    overrides = db.session.query(UserPermissionOverride).filter_by(user_id=user.id).all()
+    user_dict["permission_overrides"] = [o.to_dict() for o in overrides]
 
     return jsonify({"user": user_dict})
 
@@ -575,3 +577,78 @@ def list_permission_categories():
     """List all permission categories."""
     categories = db.session.query(Permission.category).distinct().all()
     return jsonify({"categories": [c[0] for c in categories]})
+
+
+# =============================================================================
+# PER-USER PERMISSION OVERRIDES
+# =============================================================================
+
+@admin_bp.get("/users/<int:user_id>/permission-overrides")
+@require_auth
+@require_permission("MANAGE_PERMISSIONS")
+def list_permission_overrides(user_id: int):
+    """List permission overrides for a user."""
+    user = db.session.query(User).get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    overrides = db.session.query(UserPermissionOverride).filter_by(user_id=user_id).all()
+    return jsonify({"overrides": [o.to_dict() for o in overrides]})
+
+
+@admin_bp.post("/users/<int:user_id>/permission-overrides")
+@require_auth
+@require_permission("MANAGE_PERMISSIONS")
+def upsert_permission_override(user_id: int):
+    """
+    Create or update a permission override for a user.
+
+    Request body:
+    - permission_code: str (required)
+    - override_type: "GRANT" or "DENY" (required)
+    - reason: str (optional)
+    """
+    user = db.session.query(User).get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    permission_code = data.get("permission_code")
+    override_type = data.get("override_type")
+    reason = data.get("reason")
+
+    if not permission_code or not override_type:
+        return jsonify({"error": "permission_code and override_type are required"}), 400
+
+    try:
+        override = permission_service.grant_permission_override(
+            user_id=user_id,
+            permission_code=permission_code,
+            granted_by_user_id=g.current_user.id,
+            override_type=override_type,
+            reason=reason,
+        )
+        return jsonify({"override": override.to_dict()}), 201
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@admin_bp.delete("/users/<int:user_id>/permission-overrides/<permission_code>")
+@require_auth
+@require_permission("MANAGE_PERMISSIONS")
+def revoke_permission_override_route(user_id: int, permission_code: str):
+    """Revoke a permission override for a user."""
+    user = db.session.query(User).get(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    override = permission_service.revoke_permission_override(
+        user_id=user_id,
+        permission_code=permission_code,
+        revoked_by_user_id=g.current_user.id,
+        reason="Revoked via admin API",
+    )
+    if not override:
+        return jsonify({"error": "Override not found"}), 404
+
+    return jsonify({"override": override.to_dict()})

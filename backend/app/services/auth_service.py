@@ -244,13 +244,17 @@ def assign_role(user_id: int, role_name: str) -> UserRole:
 
 
 def create_default_roles(org_id: int):
-    """Create standard roles for a specific organization if they don't exist."""
+    """Create standard roles for a specific organization if they don't exist.
+
+    Note: The 'developer' role is kept for bootstrap/testing purposes but should
+    not be assigned to production users.
+    """
     roles = [
         ("admin", "Full system access"),
-        ("developer", "Full system access with role assignment for development/testing"),
         ("manager", "Store management and approvals"),
         ("cashier", "POS sales only"),
     ]
+    # Note: 'developer' role removed from runtime creation (bootstrap-only)
 
     for name, desc in roles:
         existing = db.session.query(Role).filter_by(org_id=org_id, name=name).first()
@@ -259,4 +263,161 @@ def create_default_roles(org_id: int):
             db.session.add(role)
 
     db.session.commit()
+
+
+# =============================================================================
+# PIN AUTHENTICATION
+# =============================================================================
+
+class PinValidationError(Exception):
+    """Raised when PIN doesn't meet requirements."""
+    pass
+
+
+def validate_pin(pin: str) -> None:
+    """
+    Validate PIN meets requirements.
+
+    Requirements:
+    - Exactly 6 digits
+    - No repeated digits (e.g., 111111)
+    - No sequential digits (e.g., 123456)
+
+    Raises PinValidationError if requirements not met.
+    """
+    if not pin:
+        raise PinValidationError("PIN is required")
+
+    if not pin.isdigit():
+        raise PinValidationError("PIN must contain only digits")
+
+    if len(pin) != 6:
+        raise PinValidationError("PIN must be exactly 6 digits")
+
+    # Check for all same digits
+    if len(set(pin)) == 1:
+        raise PinValidationError("PIN cannot be all the same digit")
+
+    # Check for sequential patterns
+    sequential_up = "0123456789"
+    sequential_down = "9876543210"
+    if pin in sequential_up or pin in sequential_down:
+        raise PinValidationError("PIN cannot be a sequential pattern")
+
+
+def hash_pin(pin: str) -> str:
+    """
+    Hash PIN using bcrypt with cost factor 12.
+
+    PIN is validated before hashing.
+    """
+    validate_pin(pin)
+    salt = bcrypt.gensalt(rounds=12)
+    hashed = bcrypt.hashpw(pin.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
+
+
+def verify_pin(pin: str, pin_hash: str) -> bool:
+    """
+    Verify PIN against bcrypt hash.
+
+    Returns True if PIN matches hash, False otherwise.
+    """
+    if not pin or not pin_hash:
+        return False
+
+    try:
+        return bcrypt.checkpw(pin.encode('utf-8'), pin_hash.encode('utf-8'))
+    except Exception:
+        return False
+
+
+def set_user_pin(user_id: int, pin: str) -> None:
+    """
+    Set or update a user's PIN.
+
+    Args:
+        user_id: User ID
+        pin: 6-digit PIN
+
+    Raises:
+        ValueError: If user not found
+        PinValidationError: If PIN doesn't meet requirements
+    """
+    user = db.session.query(User).filter_by(id=user_id).first()
+    if not user:
+        raise ValueError("User not found")
+
+    # Hash validates PIN
+    user.pin_hash = hash_pin(pin)
+    db.session.commit()
+
+
+def clear_user_pin(user_id: int) -> None:
+    """
+    Clear a user's PIN.
+
+    Args:
+        user_id: User ID
+
+    Raises:
+        ValueError: If user not found
+    """
+    user = db.session.query(User).filter_by(id=user_id).first()
+    if not user:
+        raise ValueError("User not found")
+
+    user.pin_hash = None
+    db.session.commit()
+
+
+def authenticate_by_pin(pin: str, org_id: int | None = None) -> User | None:
+    """
+    Authenticate user by PIN.
+
+    MULTI-TENANT: If org_id is provided, authentication is scoped to that org.
+
+    Returns User if PIN valid and user/org active, None otherwise.
+    Updates last_login_at timestamp on successful authentication.
+
+    Args:
+        pin: 6-digit PIN
+        org_id: Organization ID to scope authentication (recommended)
+
+    Returns:
+        User object if PIN valid, None otherwise
+    """
+    if not pin or len(pin) != 6 or not pin.isdigit():
+        return None
+
+    # Query users with PIN set
+    query = db.session.query(User).filter(
+        User.pin_hash.isnot(None),
+        User.is_active.is_(True),
+    )
+
+    if org_id is not None:
+        query = query.filter(User.org_id == org_id)
+
+    # Check each user's PIN (there shouldn't be many with PINs set)
+    users = query.all()
+    for user in users:
+        if verify_pin(pin, user.pin_hash):
+            # Verify organization is active
+            org = db.session.query(Organization).filter_by(id=user.org_id).first()
+            if not org or not org.is_active:
+                continue
+
+            # Update last login
+            user.last_login_at = utcnow()
+            db.session.commit()
+            return user
+
+    return None
+
+
+def user_has_pin(user_id: int) -> bool:
+    """Check if a user has a PIN set."""
+    user = db.session.query(User).filter_by(id=user_id).first()
+    return user is not None and user.pin_hash is not None
 

@@ -25,6 +25,7 @@ class PermissionCategory:
     SYSTEM = "SYSTEM"
     DOCUMENTS = "DOCUMENTS"
     REGISTERS = "REGISTERS"
+    TIMEKEEPING = "TIMEKEEPING"
 
 
 
@@ -63,6 +64,18 @@ PERMISSION_DEFINITIONS = [
         "VIEW_COGS",
         "View COGS",
         "View cost of goods sold and WAC calculations",
+        PermissionCategory.INVENTORY
+    ),
+    (
+        "VIEW_VENDORS",
+        "View Vendors",
+        "View vendor list",
+        PermissionCategory.INVENTORY
+    ),
+    (
+        "MANAGE_VENDORS",
+        "Manage Vendors",
+        "Create and edit vendors",
         PermissionCategory.INVENTORY
     ),
 
@@ -223,6 +236,54 @@ PERMISSION_DEFINITIONS = [
         "Full system access (admin only)",
         PermissionCategory.SYSTEM
     ),
+    (
+        "CREATE_IMPORTS",
+        "Create Imports",
+        "Create and manage import batches",
+        PermissionCategory.SYSTEM
+    ),
+    (
+        "APPROVE_IMPORTS",
+        "Approve Imports",
+        "Approve and post imports",
+        PermissionCategory.SYSTEM
+    ),
+    (
+        "VIEW_ANALYTICS",
+        "View Analytics",
+        "View analytics and reports",
+        PermissionCategory.SYSTEM
+    ),
+    (
+        "VIEW_CROSS_STORE_ANALYTICS",
+        "View Cross-Store Analytics",
+        "View org-wide analytics",
+        PermissionCategory.SYSTEM
+    ),
+    (
+        "CLOCK_IN_OUT",
+        "Clock In/Out",
+        "Clock in and out for shifts",
+        PermissionCategory.TIMEKEEPING
+    ),
+    (
+        "VIEW_TIMEKEEPING",
+        "View Timekeeping",
+        "View time entries and reports",
+        PermissionCategory.TIMEKEEPING
+    ),
+    (
+        "APPROVE_TIME_CORRECTIONS",
+        "Approve Time Corrections",
+        "Approve time clock corrections",
+        PermissionCategory.TIMEKEEPING
+    ),
+    (
+        "MANAGE_TIMEKEEPING",
+        "Manage Timekeeping",
+        "Full timekeeping administration",
+        PermissionCategory.TIMEKEEPING
+    ),
 ]
 
 
@@ -269,6 +330,16 @@ DEFAULT_ROLE_PERMISSIONS = {
         "MANAGE_STORES",
         "MANAGE_PERMISSIONS",
         "SYSTEM_ADMIN",
+        "VIEW_VENDORS",
+        "MANAGE_VENDORS",
+        "CREATE_IMPORTS",
+        "APPROVE_IMPORTS",
+        "VIEW_ANALYTICS",
+        "VIEW_CROSS_STORE_ANALYTICS",
+        "CLOCK_IN_OUT",
+        "VIEW_TIMEKEEPING",
+        "APPROVE_TIME_CORRECTIONS",
+        "MANAGE_TIMEKEEPING",
     ],
 
     "developer": [
@@ -305,6 +376,16 @@ DEFAULT_ROLE_PERMISSIONS = {
         "MANAGE_STORES",
         "MANAGE_PERMISSIONS",
         "SYSTEM_ADMIN",
+        "VIEW_VENDORS",
+        "MANAGE_VENDORS",
+        "CREATE_IMPORTS",
+        "APPROVE_IMPORTS",
+        "VIEW_ANALYTICS",
+        "VIEW_CROSS_STORE_ANALYTICS",
+        "CLOCK_IN_OUT",
+        "VIEW_TIMEKEEPING",
+        "APPROVE_TIME_CORRECTIONS",
+        "MANAGE_TIMEKEEPING",
     ],
 
     "manager": [
@@ -335,6 +416,14 @@ DEFAULT_ROLE_PERMISSIONS = {
         "VIEW_AUDIT_LOG",
         "VIEW_STORES",
         "MANAGE_STORES",
+        "VIEW_VENDORS",
+        "MANAGE_VENDORS",
+        "CREATE_IMPORTS",
+        "APPROVE_IMPORTS",
+        "VIEW_ANALYTICS",
+        "CLOCK_IN_OUT",
+        "VIEW_TIMEKEEPING",
+        "APPROVE_TIME_CORRECTIONS",
     ],
 
     "cashier": [
@@ -343,6 +432,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "CREATE_SALE",     # Primary job: ring up sales
         "POST_SALE",       # Finalize sales
         "PROCESS_RETURN",  # Handle returns
+        "CLOCK_IN_OUT",
     ],
 }
 
