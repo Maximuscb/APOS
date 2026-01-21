@@ -30,10 +30,14 @@ export function SalesInterface({
   products,
   storeId,
   isAuthed,
+  registerId,
+  sessionId,
 }: {
   products: Product[];
   storeId: number;
   isAuthed: boolean;
+  registerId?: number | null;
+  sessionId?: number | null;
 }) {
   const [currentSale, setCurrentSale] = useState<Sale | null>(null);
   const [lines, setLines] = useState<SaleLine[]>([]);
@@ -50,7 +54,10 @@ export function SalesInterface({
     setLoading(true);
     setError(null);
     try {
-      const result = await apiPost<{ sale: Sale }>("/api/sales/", { store_id: storeId });
+      const payload: Record<string, unknown> = { store_id: storeId };
+      if (registerId) payload.register_id = registerId;
+      if (sessionId) payload.register_session_id = sessionId;
+      const result = await apiPost<{ sale: Sale }>("/api/sales/", payload);
       setCurrentSale(result.sale);
       setLines([]);
     } catch (e: any) {
@@ -70,7 +77,16 @@ export function SalesInterface({
         `/api/sales/${currentSale.id}/lines`,
         { product_id: selectedProductId, quantity }
       );
-      setLines([...lines, result.line]);
+      // Upsert: replace existing line if present, otherwise append
+      setLines((prev) => {
+        const idx = prev.findIndex((l) => l.id === result.line.id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = result.line;
+          return updated;
+        }
+        return [...prev, result.line];
+      });
       setQuantity(1);
     } catch (e: any) {
       setError(e?.message ?? "Failed to add line");

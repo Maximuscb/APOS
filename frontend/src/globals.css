@@ -1,0 +1,116 @@
+/* Overview: Global theme tokens and baseline styles for the iOS-inspired UI. */
+
+:root {
+  font-family: "SF Pro Text", "SF Pro Display", "Geist", "Manrope", "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --primary: #0a84ff;
+  --secondary: #34c759;
+  --accent: #ff9f0a;
+  --destructive: #ff3b30;
+  --background: #f5f6fb;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --muted: #667085;
+  --radius: 22px;
+
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.14);
+  --surface: rgba(255, 255, 255, 0.86);
+  --surface-strong: rgba(255, 255, 255, 0.94);
+  --surface-muted: rgba(255, 255, 255, 0.7);
+  --surface-tint: rgba(10, 132, 255, 0.1);
+
+  --shadow-sm: 0 6px 18px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 16px 32px rgba(15, 23, 42, 0.12);
+  --shadow-lg: 0 24px 48px rgba(15, 23, 42, 0.16);
+  --shadow-primary: 0 16px 36px rgba(10, 132, 255, 0.25);
+
+  --success-bg: rgba(52, 199, 89, 0.18);
+  --success-text: #1b5e20;
+  --warning-bg: rgba(255, 159, 10, 0.18);
+  --warning-text: #7a4a00;
+  --info-bg: rgba(10, 132, 255, 0.16);
+  --info-text: #0b4ea2;
+  --danger-bg: rgba(255, 59, 48, 0.18);
+  --danger-text: #8f1f16;
+
+  --glow-primary: rgba(10, 132, 255, 0.18);
+  --glow-secondary: rgba(52, 199, 89, 0.12);
+  --background-strong: #eef1f7;
+  --overlay: rgba(15, 23, 42, 0.3);
+  --overlay-strong: rgba(15, 23, 42, 0.35);
+  --grid-line: rgba(15, 23, 42, 0.04);
+  --focus-ring: rgba(10, 132, 255, 0.25);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at 10% 10%, var(--glow-primary), transparent 48%),
+    radial-gradient(circle at 90% 0%, var(--glow-secondary), transparent 42%),
+    linear-gradient(140deg, var(--background), var(--background-strong));
+  color: var(--foreground);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+      90deg,
+      var(--grid-line) 0,
+      var(--grid-line) 1px,
+      transparent 1px,
+      transparent 120px
+    ),
+    repeating-linear-gradient(
+      180deg,
+      var(--grid-line) 0,
+      var(--grid-line) 1px,
+      transparent 1px,
+      transparent 120px
+    );
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: -1;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+button,
+input,
+select,
+textarea,
+summary {
+  outline: none;
+}
+
+:focus-visible {
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}

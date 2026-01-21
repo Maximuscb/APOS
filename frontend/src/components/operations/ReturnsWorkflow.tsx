@@ -181,19 +181,20 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
       {notice && <div className="alert alert--success">{notice}</div>}
 
       {/* Sale lookup section */}
-      <div style={{ marginBottom: 16, padding: 12, border: "1px solid #ddd", background: "#f9f9f9" }}>
+      <div className="form-card" style={{ marginBottom: 16 }}>
         <h4>Create Return</h4>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginBottom: 8 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span>Sale ID</span>
+        <div className="form-row" style={{ marginBottom: 8 }}>
+          <label className="form-stack">
+            <span className="form-label">Sale ID</span>
             <input
+              className="input"
               value={saleIdInput}
               onChange={(e) => setSaleIdInput(e.target.value)}
               placeholder="Enter sale ID"
               style={{ width: 120 }}
             />
           </label>
-          <button onClick={lookupSale} style={{ padding: "6px 12px" }}>
+          <button onClick={lookupSale} className="btn btn--primary btn--sm">
             Look Up Sale
           </button>
         </div>
@@ -205,26 +206,26 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
               {(selectedSale.total_cents / 100).toFixed(2)}
             </p>
 
-            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 8 }}>
+            <table className="data-table">
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Product</th>
-                  <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Qty Sold</th>
-                  <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Price</th>
-                  <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Return Qty</th>
+                  <th>Product</th>
+                  <th>Qty Sold</th>
+                  <th>Price</th>
+                  <th>Return Qty</th>
                 </tr>
               </thead>
               <tbody>
                 {selectedSale.lines?.map((line) => (
                   <tr key={line.id}>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
+                    <td>
                       {line.product_name || line.sku || `Product #${line.product_id}`}
                     </td>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{line.quantity}</td>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
+                    <td>{line.quantity}</td>
+                    <td>
                       ${(line.unit_price_cents / 100).toFixed(2)}
                     </td>
-                    <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
+                    <td>
                       <input
                         type="number"
                         min={0}
@@ -236,7 +237,8 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
                             [line.id]: Math.min(line.quantity, Math.max(0, parseInt(e.target.value) || 0)),
                           })
                         }
-                        style={{ width: 60 }}
+                        className="input"
+                        style={{ width: 90 }}
                       />
                     </td>
                   </tr>
@@ -244,18 +246,20 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
               </tbody>
             </table>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span>Reason</span>
+            <div className="form-row" style={{ marginTop: 8 }}>
+              <label className="form-stack">
+                <span className="form-label">Reason</span>
                 <input
+                  className="input"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="Return reason"
                 />
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span>Restocking Fee (cents)</span>
+              <label className="form-stack">
+                <span className="form-label">Restocking Fee (cents)</span>
                 <input
+                  className="input"
                   value={restockingFee}
                   onChange={(e) => setRestockingFee(e.target.value)}
                   placeholder="0"
@@ -264,7 +268,7 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
               </label>
             </div>
 
-            <div style={{ marginTop: 12 }}>
+            <div className="form-actions" style={{ marginTop: 12 }}>
               <button onClick={createReturn} className="btn btn--primary" style={{ marginRight: 8 }}>
                 Create Return
               </button>
@@ -278,9 +282,9 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
 
       {/* Returns list */}
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div className="form-row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
           <h4>Returns ({returns.length})</h4>
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label className="inline-toggle">
             <input
               type="checkbox"
               checked={showPendingOnly}
@@ -295,61 +299,57 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
         ) : returns.length === 0 ? (
           <p className="muted">No returns found.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table className="data-table">
             <thead>
               <tr>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>ID</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Sale ID</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Status</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Reason</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Created</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Actions</th>
+                <th>ID</th>
+                <th>Sale ID</th>
+                <th>Status</th>
+                <th>Reason</th>
+                <th>Created</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {returns.map((r) => (
                 <tr key={r.id}>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{r.id}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{r.original_sale_id}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  <td>{r.id}</td>
+                  <td>{r.original_sale_id}</td>
+                  <td>
                     <span
-                      style={{
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                        fontSize: 12,
-                        background:
-                          r.status === "PENDING"
-                            ? "#fff3cd"
-                            : r.status === "APPROVED"
-                              ? "#d4edda"
-                              : r.status === "COMPLETED"
-                                ? "#cce5ff"
-                                : "#f8d7da",
-                      }}
+                      className={`status-pill ${
+                        r.status === "PENDING"
+                          ? "status-pill--warning"
+                          : r.status === "APPROVED"
+                            ? "status-pill--success"
+                            : r.status === "COMPLETED"
+                              ? "status-pill--info"
+                              : "status-pill--danger"
+                      }`}
                     >
                       {r.status}
                     </span>
                   </td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{r.reason || "-"}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  <td>{r.reason || "-"}</td>
+                  <td>
                     {new Date(r.created_at).toLocaleDateString()}
                   </td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      <button onClick={() => loadReturnDetails(r.id)} style={{ padding: "2px 6px", fontSize: 12 }}>
+                  <td>
+                    <div className="form-actions">
+                      <button onClick={() => loadReturnDetails(r.id)} className="btn btn--ghost btn--sm">
                         View
                       </button>
                       {r.status === "PENDING" && (
                         <>
                           <button
                             onClick={() => performAction(r.id, "approve")}
-                            style={{ padding: "2px 6px", fontSize: 12 }}
+                            className="btn btn--primary btn--sm"
                           >
                             Approve
                           </button>
                           <button
                             onClick={() => performAction(r.id, "reject")}
-                            style={{ padding: "2px 6px", fontSize: 12 }}
+                            className="btn btn--warn btn--sm"
                           >
                             Reject
                           </button>
@@ -358,7 +358,7 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
                       {r.status === "APPROVED" && (
                         <button
                           onClick={() => performAction(r.id, "complete")}
-                          style={{ padding: "2px 6px", fontSize: 12 }}
+                          className="btn btn--primary btn--sm"
                         >
                           Complete
                         </button>
@@ -374,31 +374,8 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
 
       {/* Return details modal */}
       {selectedReturn && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-          onClick={() => setSelectedReturn(null)}
-        >
-          <div
-            style={{
-              background: "white",
-              padding: 24,
-              borderRadius: 8,
-              maxWidth: 500,
-              width: "90%",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="overlay" onClick={() => setSelectedReturn(null)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <h3>Return #{selectedReturn.id}</h3>
             <p>
               <strong>Status:</strong> {selectedReturn.status}
@@ -426,7 +403,7 @@ export function ReturnsWorkflow({ storeId, isAuthed }: Props) {
               </>
             )}
 
-            <button onClick={() => setSelectedReturn(null)} style={{ marginTop: 16 }}>
+            <button onClick={() => setSelectedReturn(null)} className="btn btn--ghost" style={{ marginTop: 16 }}>
               Close
             </button>
           </div>

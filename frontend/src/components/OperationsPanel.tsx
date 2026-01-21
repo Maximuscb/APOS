@@ -31,21 +31,12 @@ export function OperationsPanel({ storeId, isAuthed }: Props) {
       </div>
 
       {/* Tab navigation */}
-      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #ddd", marginBottom: 16 }}>
+      <div className="register-tabs" style={{ marginBottom: 16 }}>
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: "12px 24px",
-              border: "none",
-              background: activeTab === tab.id ? "#fff" : "#f5f5f5",
-              borderBottom: activeTab === tab.id ? "2px solid #2563eb" : "2px solid transparent",
-              cursor: "pointer",
-              fontWeight: activeTab === tab.id ? 600 : 400,
-              color: activeTab === tab.id ? "#2563eb" : "#666",
-              transition: "all 0.15s ease",
-            }}
+            className={`register-tab ${activeTab === tab.id ? "register-tab--active" : ""}`}
           >
             {tab.label}
           </button>

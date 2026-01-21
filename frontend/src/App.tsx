@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { RegisterMode } from "./RegisterMode";
 import { OperationsSuite } from "./OperationsSuite";
+import { appConfig } from "./lib/config";
 
 export default function App() {
   const [mode, setMode] = useState<"register" | "operations">(() => {
@@ -10,6 +11,14 @@ export default function App() {
   });
 
   useEffect(() => {
+    document.title = appConfig.appName;
+    const iconHref = appConfig.brand.iconHref;
+    if (iconHref) {
+      const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+      if (link) {
+        link.href = iconHref;
+      }
+    }
     const handleHashChange = () => {
       if (window.location.hash === "#register-mode") {
         setMode("register");

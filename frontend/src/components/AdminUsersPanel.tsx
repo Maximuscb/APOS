@@ -192,7 +192,7 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
           <p className="muted">View, create, and manage user accounts and roles.</p>
         </div>
         <div className="panel__actions">
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label className="inline-toggle">
             <input
               type="checkbox"
               checked={showInactive}
@@ -213,29 +213,32 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
       {notice && <div className="alert alert--success">{notice}</div>}
 
       {showCreateForm && (
-        <form onSubmit={createUser} style={{ marginBottom: 16, padding: 12, border: "1px solid #ddd", background: "#f9f9f9" }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Create New User</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span>Username</span>
+        <form onSubmit={createUser} className="form-card" style={{ marginBottom: 16 }}>
+          <div className="form-title">Create New User</div>
+          <div className="form-row">
+            <label className="form-stack">
+              <span className="form-label">Username</span>
               <input
+                className="input"
                 value={newUsername}
                 onChange={(e) => setNewUsername(e.target.value)}
                 required
               />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span>Email</span>
+            <label className="form-stack">
+              <span className="form-label">Email</span>
               <input
+                className="input"
                 type="email"
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
                 required
               />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span>Password</span>
+            <label className="form-stack">
+              <span className="form-label">Password</span>
               <input
+                className="input"
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
@@ -243,9 +246,9 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
                 minLength={8}
               />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span>Role</span>
-              <select value={newRole} onChange={(e) => setNewRole(e.target.value)}>
+            <label className="form-stack">
+              <span className="form-label">Role</span>
+              <select className="select" value={newRole} onChange={(e) => setNewRole(e.target.value)}>
                 {roles.map((r) => (
                   <option key={r.name} value={r.name}>
                     {r.name}
@@ -256,12 +259,13 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
             <button
               type="submit"
               disabled={creating}
-              style={{ padding: "8px 12px", cursor: "pointer", marginTop: 18 }}
+              className="btn btn--primary"
+              style={{ marginTop: 18 }}
             >
               {creating ? "Creating..." : "Create"}
             </button>
           </div>
-          <p style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+          <p className="helper-text" style={{ marginTop: 8 }}>
             Password must be 8+ characters with uppercase, lowercase, digit, and special character.
           </p>
         </form>
@@ -276,69 +280,52 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
           ) : users.length === 0 ? (
             <p>No users found.</p>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table className="data-table">
               <thead>
                 <tr>
-                  <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>
-                    Username
-                  </th>
-                  <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>
-                    Email
-                  </th>
-                  <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>
-                    Status
-                  </th>
-                  <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>
-                    Actions
-                  </th>
+                  <th>Username</th>
+                  <th>Email</th>
+                  <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {users.map((user) => (
                   <tr
                     key={user.id}
-                    style={{
-                      background: selectedUser?.id === user.id ? "#e3f2fd" : "transparent",
-                      opacity: user.is_active ? 1 : 0.6,
-                    }}
+                    className={selectedUser?.id === user.id ? "table-row--selected" : ""}
+                    style={{ opacity: user.is_active ? 1 : 0.6 }}
                   >
-                    <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-                      {user.username}
-                    </td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-                      {user.email}
-                    </td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                    <td>{user.username}</td>
+                    <td>{user.email}</td>
+                    <td>
                       <span
-                        style={{
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          background: user.is_active ? "#c8e6c9" : "#ffcdd2",
-                          fontSize: 12,
-                        }}
+                        className={`status-pill ${
+                          user.is_active ? "status-pill--success" : "status-pill--danger"
+                        }`}
                       >
                         {user.is_active ? "Active" : "Inactive"}
                       </span>
                     </td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-                      <div style={{ display: "flex", gap: 4 }}>
+                    <td>
+                      <div className="form-actions">
                         <button
                           onClick={() => loadUserDetails(user.id)}
-                          style={{ padding: "4px 8px", cursor: "pointer", fontSize: 12 }}
+                          className="btn btn--ghost btn--sm"
                         >
                           Details
                         </button>
                         {user.is_active ? (
                           <button
                             onClick={() => deactivateUser(user.id)}
-                            style={{ padding: "4px 8px", cursor: "pointer", fontSize: 12 }}
+                            className="btn btn--ghost btn--sm"
                           >
                             Deactivate
                           </button>
                         ) : (
                           <button
                             onClick={() => reactivateUser(user.id)}
-                            style={{ padding: "4px 8px", cursor: "pointer", fontSize: 12 }}
+                            className="btn btn--ghost btn--sm"
                           >
                             Reactivate
                           </button>
@@ -354,14 +341,7 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
 
         {/* User details panel */}
         {selectedUser && (
-          <div
-            style={{
-              width: 300,
-              padding: 16,
-              border: "1px solid #ddd",
-              background: "#f9f9f9",
-            }}
-          >
+          <div className="form-card" style={{ width: 320 }}>
             <h3>User Details</h3>
             <p>
               <strong>Username:</strong> {selectedUser.username}
@@ -375,11 +355,9 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
             <p>
               <strong>Status:</strong>{" "}
               <span
-                style={{
-                  padding: "2px 6px",
-                  borderRadius: 4,
-                  background: selectedUser.is_active ? "#c8e6c9" : "#ffcdd2",
-                }}
+                className={`status-pill ${
+                  selectedUser.is_active ? "status-pill--success" : "status-pill--danger"
+                }`}
               >
                 {selectedUser.is_active ? "Active" : "Inactive"}
               </span>
@@ -391,7 +369,7 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
 
             <h4 style={{ marginTop: 16 }}>Roles</h4>
             {selectedUserRoles.length === 0 ? (
-              <p style={{ color: "#666" }}>No roles assigned</p>
+              <p className="helper-text">No roles assigned</p>
             ) : (
               <ul style={{ margin: 0, paddingLeft: 20 }}>
                 {selectedUserRoles.map((role) => (
@@ -399,12 +377,8 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
                     {role}
                     <button
                       onClick={() => removeRole(selectedUser.id, role)}
-                      style={{
-                        marginLeft: 8,
-                        padding: "2px 6px",
-                        cursor: "pointer",
-                        fontSize: 11,
-                      }}
+                      className="btn btn--ghost btn--sm"
+                      style={{ marginLeft: 8 }}
                     >
                       Remove
                     </button>
@@ -414,8 +388,8 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
             )}
 
             <h4 style={{ marginTop: 16 }}>Assign Role</h4>
-            <div style={{ display: "flex", gap: 8 }}>
-              <select id="assign-role-select" defaultValue="">
+            <div className="form-actions">
+              <select id="assign-role-select" defaultValue="" className="select">
                 <option value="" disabled>
                   Select role
                 </option>
@@ -437,7 +411,7 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
                     select.value = "";
                   }
                 }}
-                style={{ padding: "4px 8px", cursor: "pointer" }}
+                className="btn btn--primary btn--sm"
               >
                 Assign
               </button>
@@ -464,7 +438,8 @@ export function AdminUsersPanel({ storeId, isAuthed }: Props) {
 
             <button
               onClick={() => setSelectedUser(null)}
-              style={{ marginTop: 16, padding: "6px 12px", cursor: "pointer" }}
+              className="btn btn--ghost"
+              style={{ marginTop: 16 }}
             >
               Close
             </button>

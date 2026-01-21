@@ -21,6 +21,7 @@ type IdentifierLookupResponse = {
   product?: Product;
   products?: Product[];
   ambiguous?: boolean;
+  error?: string;
 };
 
 export function ReceiveInventoryForm({
@@ -204,26 +205,17 @@ export function ReceiveInventoryForm({
   }
 
   return (
-    <div
-      style={{
-        marginTop: 12,
-        padding: 12,
-        border: "1px solid #eee",
-        borderRadius: 8,
-        background: "#fff",
-      }}
-    >
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
-        Receive Inventory
-      </div>
+    <div className="form-card" style={{ marginTop: 12 }}>
+      <div className="form-title">Receive Inventory</div>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#444" }}>Vendor</label>
+      <div className="form-row">
+        <div className="form-stack">
+          <label className="form-label">Vendor</label>
           <select
             value={vendorId}
             onChange={(e) => setVendorId(e.target.value ? Number(e.target.value) : "")}
-            style={{ padding: 6, minWidth: 240 }}
+            className="select"
+            style={{ minWidth: 240 }}
             disabled={loadingVendors}
           >
             <option value="">
@@ -238,12 +230,13 @@ export function ReceiveInventoryForm({
           </select>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#444" }}>Receive Type</label>
+        <div className="form-stack">
+          <label className="form-label">Receive Type</label>
           <select
             value={receiveType}
             onChange={(e) => setReceiveType(e.target.value)}
-            style={{ padding: 6, minWidth: 180 }}
+            className="select"
+            style={{ minWidth: 180 }}
           >
             {receiveTypes.length ? (
               receiveTypes.map((type) => (
@@ -263,32 +256,34 @@ export function ReceiveInventoryForm({
           </select>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#444" }}>Scan/Search Identifier</label>
-          <div style={{ display: "flex", gap: 8 }}>
+        <div className="form-stack">
+          <label className="form-label">Scan/Search Identifier</label>
+          <div className="form-actions">
             <input
               value={scanValue}
               onChange={(e) => setScanValue(e.target.value)}
               placeholder="Scan barcode or enter SKU"
-              style={{ padding: 6, minWidth: 220 }}
+              className="input"
+              style={{ minWidth: 220 }}
             />
             <button
               type="button"
               onClick={() => lookupIdentifier(scanValue)}
               disabled={scanLoading}
-              style={{ padding: "6px 10px", cursor: "pointer" }}
+              className="btn btn--ghost btn--sm"
             >
               {scanLoading ? "Searching..." : "Search"}
             </button>
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#444" }}>Product</label>
+        <div className="form-stack">
+          <label className="form-label">Product</label>
           <select
             value={productId}
             onChange={(e) => setProductId(e.target.value ? Number(e.target.value) : "")}
-            style={{ padding: 6, minWidth: 260 }}
+            className="select"
+            style={{ minWidth: 260 }}
           >
             <option value="">Select</option>
             {activeProducts.map((p) => (
@@ -299,51 +294,55 @@ export function ReceiveInventoryForm({
           </select>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#444" }}>Quantity</label>
+        <div className="form-stack">
+          <label className="form-label">Quantity</label>
           <input
             value={qty}
             onChange={(e) => setQty(e.target.value)}
             inputMode="numeric"
-            style={{ padding: 6, width: 120 }}
+            className="input"
+            style={{ width: 120 }}
           />
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#444" }}>Unit Cost (USD)</label>
+        <div className="form-stack">
+          <label className="form-label">Unit Cost (USD)</label>
           <input
             value={unitCostUsd}
             onChange={(e) => setUnitCostUsd(e.target.value)}
             placeholder="2.50"
             inputMode="decimal"
-            style={{ padding: 6, width: 140 }}
+            className="input"
+            style={{ width: 140 }}
           />
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label style={{ fontSize: 12, color: "#444" }}>Occurred At (optional)</label>
+        <div className="form-stack">
+          <label className="form-label">Occurred At (optional)</label>
           <input
             type="datetime-local"
             value={occurredAtLocal}
             onChange={(e) => setOccurredAtLocal(e.target.value)}
-            style={{ padding: 6, width: 200 }}
+            className="input"
+            style={{ width: 200 }}
           />
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 220 }}>
-          <label style={{ fontSize: 12, color: "#444" }}>Note (optional)</label>
+        <div className="form-stack" style={{ flex: 1, minWidth: 220 }}>
+          <label className="form-label">Note (optional)</label>
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="invoice #, vendor, etc."
-            style={{ padding: 6, width: "100%" }}
+            className="input"
+            style={{ width: "100%" }}
           />
         </div>
 
         <button
           onClick={submit}
           disabled={submitting}
-          style={{ padding: "8px 12px", cursor: "pointer" }}
+          className="btn btn--primary"
         >
           {submitting ? "Receiving..." : "Receive"}
         </button>
@@ -351,14 +350,16 @@ export function ReceiveInventoryForm({
 
       {scanResults.length > 0 && (
         <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Search Results</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="helper-text" style={{ fontWeight: 600, marginBottom: 6 }}>
+            Search Results
+          </div>
+          <div className="form-actions">
             {scanResults.map((result) => (
               <button
                 key={result.id}
                 type="button"
                 onClick={() => setProductId(result.id)}
-                style={{ padding: "6px 10px", cursor: "pointer" }}
+                className="btn btn--ghost btn--sm"
               >
                 {result.name} ({result.sku})
               </button>
@@ -368,11 +369,11 @@ export function ReceiveInventoryForm({
       )}
 
       {scanConflict && scanConflict.length > 0 && (
-        <div style={{ marginTop: 12, color: "#9b1c1c" }}>
+        <div className="notice notice--error" style={{ marginTop: 12 }}>
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
             Multiple matches found. Select the correct product.
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="form-actions">
             {scanConflict.map((result) => (
               <button
                 key={result.id}
@@ -381,7 +382,7 @@ export function ReceiveInventoryForm({
                   setProductId(result.id);
                   setScanConflict(null);
                 }}
-                style={{ padding: "6px 10px", cursor: "pointer" }}
+                className="btn btn--ghost btn--sm"
               >
                 {result.name} ({result.sku})
               </button>
@@ -390,8 +391,16 @@ export function ReceiveInventoryForm({
         </div>
       )}
 
-      {err && <div style={{ marginTop: 10, color: "#9b1c1c" }}>{err}</div>}
-      {ok && <div style={{ marginTop: 10, color: "#1f7a1f" }}>{ok}</div>}
+      {err && (
+        <div className="notice notice--error" style={{ marginTop: 10 }}>
+          {err}
+        </div>
+      )}
+      {ok && (
+        <div className="notice notice--success" style={{ marginTop: 10 }}>
+          {ok}
+        </div>
+      )}
     </div>
   );
 }

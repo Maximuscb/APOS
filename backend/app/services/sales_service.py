@@ -63,7 +63,7 @@ def create_sale(store_id: int, user_id: int | None = None) -> Sale:
 
 
 def add_line(sale_id: int, product_id: int, quantity: int) -> SaleLine:
-    """Add line item to draft sale."""
+    """Add line item to draft sale, merging with existing line if duplicate."""
     def _op():
         sale = lock_for_update(db.session.query(Sale).filter_by(id=sale_id)).first()
         if not sale:
@@ -81,6 +81,22 @@ def add_line(sale_id: int, product_id: int, quantity: int) -> SaleLine:
         if product.price_cents is None:
             raise SaleError("Product has no price")
 
+        # Check for existing draft line with same product and price (not yet posted)
+        existing_line = db.session.query(SaleLine).filter_by(
+            sale_id=sale_id,
+            product_id=product_id,
+            unit_price_cents=product.price_cents,
+            inventory_transaction_id=None
+        ).first()
+
+        if existing_line:
+            # Merge: increment quantity and recompute total
+            existing_line.quantity += quantity
+            existing_line.line_total_cents = existing_line.quantity * existing_line.unit_price_cents
+            db.session.commit()
+            return existing_line
+
+        # No existing line found, create new one
         line_total = product.price_cents * quantity
 
         line = SaleLine(

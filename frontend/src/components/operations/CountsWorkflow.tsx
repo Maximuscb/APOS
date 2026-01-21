@@ -170,21 +170,26 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
       {notice && <div className="alert alert--success">{notice}</div>}
 
       {/* Create count or add to active count */}
-      <div style={{ marginBottom: 16, padding: 12, border: "1px solid #ddd", background: "#f9f9f9" }}>
+      <div className="form-card" style={{ marginBottom: 16 }}>
         {!activeCountId ? (
           <>
             <h4>Start New Count</h4>
-            <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span>Count Type</span>
-                <select value={countType} onChange={(e) => setCountType(e.target.value as "CYCLE" | "FULL")}>
+            <div className="form-row">
+              <label className="form-stack">
+                <span className="form-label">Count Type</span>
+                <select
+                  className="select"
+                  value={countType}
+                  onChange={(e) => setCountType(e.target.value as "CYCLE" | "FULL")}
+                >
                   <option value="CYCLE">Cycle Count</option>
                   <option value="FULL">Full Inventory</option>
                 </select>
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span>Reason</span>
+              <label className="form-stack">
+                <span className="form-label">Reason</span>
                 <input
+                  className="input"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="Optional"
@@ -200,8 +205,12 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
             <h4>Active Count #{activeCountId}</h4>
             <p className="muted">Add products and their actual quantities.</p>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <select value={selectedProductId} onChange={(e) => setSelectedProductId(Number(e.target.value))}>
+            <div className="form-actions" style={{ marginTop: 8 }}>
+              <select
+                className="select"
+                value={selectedProductId}
+                onChange={(e) => setSelectedProductId(Number(e.target.value))}
+              >
                 <option value="">Select product</option>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -215,9 +224,14 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
                 value={actualQuantity}
                 onChange={(e) => setActualQuantity(e.target.value)}
                 placeholder="Actual qty"
-                style={{ width: 100 }}
+                className="input"
+                style={{ width: 120 }}
               />
-              <button onClick={addCountLine} disabled={!selectedProductId || !actualQuantity}>
+              <button
+                onClick={addCountLine}
+                disabled={!selectedProductId || !actualQuantity}
+                className="btn btn--primary btn--sm"
+              >
                 Add Item
               </button>
             </div>
@@ -225,30 +239,24 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
             {selectedCount && selectedCount.lines && selectedCount.lines.length > 0 && (
               <div style={{ marginTop: 12 }}>
                 <strong>Items counted ({selectedCount.lines.length}):</strong>
-                <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 4 }}>
+                <table className="data-table">
                   <thead>
                     <tr>
-                      <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Product</th>
-                      <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Expected</th>
-                      <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Actual</th>
-                      <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Variance</th>
+                      <th>Product</th>
+                      <th>Expected</th>
+                      <th>Actual</th>
+                      <th>Variance</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selectedCount.lines.map((line) => (
                       <tr key={line.id}>
-                        <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
+                        <td>
                           {line.product_name || getProductName(line.product_id)}
                         </td>
-                        <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{line.expected_quantity}</td>
-                        <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{line.actual_quantity}</td>
-                        <td
-                          style={{
-                            padding: 4,
-                            borderBottom: "1px solid #eee",
-                            color: line.variance !== 0 ? (line.variance > 0 ? "green" : "red") : "inherit",
-                          }}
-                        >
+                        <td>{line.expected_quantity}</td>
+                        <td>{line.actual_quantity}</td>
+                        <td className={line.variance !== 0 ? (line.variance > 0 ? "text-success" : "text-error") : ""}>
                           {line.variance > 0 ? "+" : ""}
                           {line.variance}
                         </td>
@@ -259,7 +267,7 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
               </div>
             )}
 
-            <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+            <div className="form-actions" style={{ marginTop: 12 }}>
               <button onClick={finishCounting} className="btn btn--primary">
                 Done Adding Items
               </button>
@@ -273,9 +281,9 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
 
       {/* Counts list */}
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div className="form-row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
           <h4>Counts ({counts.length})</h4>
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label className="inline-toggle">
             <input
               type="checkbox"
               checked={showPendingOnly}
@@ -290,48 +298,44 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
         ) : counts.length === 0 ? (
           <p className="muted">No counts found.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table className="data-table">
             <thead>
               <tr>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>ID</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Type</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Status</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Reason</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Created</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Actions</th>
+                <th>ID</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Reason</th>
+                <th>Created</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {counts.map((c) => (
                 <tr key={c.id}>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{c.id}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{c.count_type}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  <td>{c.id}</td>
+                  <td>{c.count_type}</td>
+                  <td>
                     <span
-                      style={{
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                        fontSize: 12,
-                        background:
-                          c.status === "PENDING"
-                            ? "#fff3cd"
-                            : c.status === "APPROVED"
-                              ? "#d4edda"
-                              : c.status === "POSTED"
-                                ? "#cce5ff"
-                                : "#f8d7da",
-                      }}
+                      className={`status-pill ${
+                        c.status === "PENDING"
+                          ? "status-pill--warning"
+                          : c.status === "APPROVED"
+                            ? "status-pill--success"
+                            : c.status === "POSTED"
+                              ? "status-pill--info"
+                              : "status-pill--danger"
+                      }`}
                     >
                       {c.status}
                     </span>
                   </td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{c.reason || "-"}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  <td>{c.reason || "-"}</td>
+                  <td>
                     {new Date(c.created_at).toLocaleDateString()}
                   </td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      <button onClick={() => loadCountDetails(c.id)} style={{ padding: "2px 6px", fontSize: 12 }}>
+                  <td>
+                    <div className="form-actions">
+                      <button onClick={() => loadCountDetails(c.id)} className="btn btn--ghost btn--sm">
                         View
                       </button>
                       {c.status === "PENDING" && (
@@ -341,20 +345,20 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
                               setActiveCountId(c.id);
                               loadCountDetails(c.id);
                             }}
-                            style={{ padding: "2px 6px", fontSize: 12 }}
+                            className="btn btn--ghost btn--sm"
                           >
                             Add Items
                           </button>
-                          <button onClick={() => performAction(c.id, "approve")} style={{ padding: "2px 6px", fontSize: 12 }}>
+                          <button onClick={() => performAction(c.id, "approve")} className="btn btn--primary btn--sm">
                             Approve
                           </button>
-                          <button onClick={() => performAction(c.id, "cancel")} style={{ padding: "2px 6px", fontSize: 12 }}>
+                          <button onClick={() => performAction(c.id, "cancel")} className="btn btn--warn btn--sm">
                             Cancel
                           </button>
                         </>
                       )}
                       {c.status === "APPROVED" && (
-                        <button onClick={() => performAction(c.id, "post")} style={{ padding: "2px 6px", fontSize: 12 }}>
+                        <button onClick={() => performAction(c.id, "post")} className="btn btn--primary btn--sm">
                           Post
                         </button>
                       )}
@@ -369,25 +373,8 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
 
       {/* Count details modal */}
       {selectedCount && !activeCountId && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-          onClick={() => setSelectedCount(null)}
-        >
-          <div
-            style={{ background: "white", padding: 24, borderRadius: 8, maxWidth: 600, width: "90%" }}
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="overlay" onClick={() => setSelectedCount(null)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <h3>Count #{selectedCount.id}</h3>
             <p><strong>Type:</strong> {selectedCount.count_type}</p>
             <p><strong>Status:</strong> {selectedCount.status}</p>
@@ -397,30 +384,25 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
             {selectedCount.lines && selectedCount.lines.length > 0 && (
               <>
                 <h4>Count Lines</h4>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <table className="data-table">
                   <thead>
                     <tr>
-                      <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Product</th>
-                      <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Expected</th>
-                      <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Actual</th>
-                      <th style={{ textAlign: "left", padding: 4, borderBottom: "1px solid #ddd" }}>Variance</th>
+                      <th>Product</th>
+                      <th>Expected</th>
+                      <th>Actual</th>
+                      <th>Variance</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selectedCount.lines.map((line) => (
                       <tr key={line.id}>
-                        <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>
+                        <td>
                           {line.product_name || getProductName(line.product_id)}
                         </td>
-                        <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{line.expected_quantity}</td>
-                        <td style={{ padding: 4, borderBottom: "1px solid #eee" }}>{line.actual_quantity}</td>
+                        <td>{line.expected_quantity}</td>
+                        <td>{line.actual_quantity}</td>
                         <td
-                          style={{
-                            padding: 4,
-                            borderBottom: "1px solid #eee",
-                            fontWeight: line.variance !== 0 ? "bold" : "normal",
-                            color: line.variance !== 0 ? (line.variance > 0 ? "green" : "red") : "inherit",
-                          }}
+                          className={line.variance !== 0 ? (line.variance > 0 ? "text-success" : "text-error") : ""}
                         >
                           {line.variance > 0 ? "+" : ""}
                           {line.variance}
@@ -432,7 +414,7 @@ export function CountsWorkflow({ storeId, isAuthed }: Props) {
               </>
             )}
 
-            <button onClick={() => setSelectedCount(null)} style={{ marginTop: 16 }}>
+            <button onClick={() => setSelectedCount(null)} className="btn btn--ghost" style={{ marginTop: 16 }}>
               Close
             </button>
           </div>

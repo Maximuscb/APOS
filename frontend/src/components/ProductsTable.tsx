@@ -55,7 +55,7 @@ export function ProductsTable({
     setEditingId(p.id);
     setName(p.name);
     setPriceUsd(p.price_cents == null ? "" : (p.price_cents / 100).toFixed(2));
-    setIsActive(p.is_active);
+                    "-"
     setRowErr(null);
   }
 
@@ -148,15 +148,12 @@ export function ProductsTable({
   }, [products, asOfUtcIso, storeId]);
 
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+    <table className="data-table">
       <thead>
         <tr>
           {["SKU", "Name", "Price", "On Hand", "WAC", "Recent Cost", "Active", "Actions"].map(
             (h) => (
-              <th
-                key={h}
-                style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}
-              >
+              <th key={h}>
                 {h}
               </th>
             )
@@ -167,7 +164,7 @@ export function ProductsTable({
       <tbody>
         {products.length === 0 ? (
           <tr>
-            <td colSpan={8} style={{ padding: 12 }}>
+            <td colSpan={8}>
               No products.
             </td>
           </tr>
@@ -180,19 +177,14 @@ export function ProductsTable({
 
             return (
               <tr key={p.id}>
-                <td
-                  style={{
-                    padding: 8,
-                    borderBottom: "1px solid #eee",
-                    fontFamily: "monospace",
-                  }}
-                >
+                <td style={{ fontFamily: "monospace" }}>
                   {p.sku}
                 </td>
 
-                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                <td>
                   {editing ? (
                     <input
+                      className="input"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       style={{ width: "100%" }}
@@ -202,9 +194,10 @@ export function ProductsTable({
                   )}
                 </td>
 
-                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                <td>
                   {editing ? (
                     <input
+                      className="input"
                       value={priceUsd}
                       onChange={(e) => setPriceUsd(e.target.value)}
                       placeholder="12.99"
@@ -212,27 +205,27 @@ export function ProductsTable({
                       style={{ width: 120 }}
                     />
                   ) : p.price_cents == null ? (
-                    "—"
+                    "-"
                   ) : (
                     `$${(p.price_cents / 100).toFixed(2)}`
                   )}
                 </td>
 
-                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-                  {inv?.quantity_on_hand ?? "—"}
+                <td>
+                  {inv?.quantity_on_hand ?? "-"}
                 </td>
 
-                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-                  {wac == null ? "—" : `$${(wac / 100).toFixed(2)}`}
+                <td>
+                  {wac == null ? "-" : `$${(wac / 100).toFixed(2)}`}
                 </td>
 
-                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-                  {recent == null ? "—" : `$${(recent / 100).toFixed(2)}`}
+                <td>
+                  {recent == null ? "-" : `$${(recent / 100).toFixed(2)}`}
                 </td>
 
-                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                <td>
                   {editing ? (
-                    <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <label className="inline-toggle">
                       <input
                         type="checkbox"
                         checked={isActive}
@@ -247,36 +240,36 @@ export function ProductsTable({
                   )}
                 </td>
 
-                <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                <td>
                   {editing ? (
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div className="form-actions">
                       <button
                         onClick={() => saveEdit(p.id)}
                         disabled={saving}
-                        style={{ padding: "6px 10px", cursor: "pointer" }}
+                        className="btn btn--primary btn--sm"
                       >
-                        {saving ? "Saving…" : "Save"}
+                        {saving ? "Saving..." : "Save"}
                       </button>
                       <button
                         onClick={cancelEdit}
                         disabled={saving}
-                        style={{ padding: "6px 10px", cursor: "pointer" }}
+                        className="btn btn--ghost btn--sm"
                       >
                         Cancel
                       </button>
-                      {rowErr && <span style={{ color: "#9b1c1c" }}>{rowErr}</span>}
+                      {rowErr && <span className="text-error">{rowErr}</span>}
                     </div>
                   ) : (
-                    <div style={{ display: "flex", gap: 8 }}>
+                    <div className="form-actions">
                       <button
                         onClick={() => startEdit(p)}
-                        style={{ padding: "6px 10px", cursor: "pointer" }}
+                        className="btn btn--ghost btn--sm"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => onDelete(p.id)}
-                        style={{ padding: "6px 10px", cursor: "pointer" }}
+                        className="btn btn--warn btn--sm"
                       >
                         Delete
                       </button>

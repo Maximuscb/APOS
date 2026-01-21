@@ -11,13 +11,11 @@ type User = {
   is_active: boolean;
 };
 
-export function AuthInterface({
-  onAuthChange,
-  storeId = 1,
-}: {
+export function AuthInterface(props: {
   onAuthChange?: () => void;
   storeId?: number;
 }) {
+  const { onAuthChange } = props;
   // Note: Registration is now admin-only via the Users page or CLI
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");

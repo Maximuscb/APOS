@@ -22,9 +22,13 @@ type PaymentSummary = {
 export function PaymentsPanel({
   authVersion,
   isAuthed,
+  registerId,
+  sessionId,
 }: {
   authVersion: number;
   isAuthed: boolean;
+  registerId?: number | null;
+  sessionId?: number | null;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -38,15 +42,11 @@ export function PaymentsPanel({
     tender_type: "CASH",
     amount_cents: 0,
     reference_number: "",
-    register_id: "",
-    register_session_id: "",
   });
 
   const [voidForm, setVoidForm] = useState({
     payment_id: "",
     reason: "",
-    register_id: "",
-    register_session_id: "",
   });
 
   const [tenderSummary, setTenderSummary] = useState<Record<string, number> | null>(null);
@@ -65,16 +65,14 @@ export function PaymentsPanel({
         tender_type: paymentForm.tender_type,
         amount_cents: Number(paymentForm.amount_cents),
         reference_number: paymentForm.reference_number || null,
-        register_id: paymentForm.register_id ? Number(paymentForm.register_id) : null,
-        register_session_id: paymentForm.register_session_id ? Number(paymentForm.register_session_id) : null,
+        register_id: registerId ?? null,
+        register_session_id: sessionId ?? null,
       });
       setPaymentForm({
         sale_id: "",
         tender_type: "CASH",
         amount_cents: 0,
         reference_number: "",
-        register_id: "",
-        register_session_id: "",
       });
     } catch (e: any) {
       setError(e?.message ?? "Failed to add payment");
@@ -115,10 +113,10 @@ export function PaymentsPanel({
     try {
       await apiPost(`/api/payments/${voidForm.payment_id}/void`, {
         reason: voidForm.reason,
-        register_id: voidForm.register_id ? Number(voidForm.register_id) : null,
-        register_session_id: voidForm.register_session_id ? Number(voidForm.register_session_id) : null,
+        register_id: registerId ?? null,
+        register_session_id: sessionId ?? null,
       });
-      setVoidForm({ payment_id: "", reason: "", register_id: "", register_session_id: "" });
+      setVoidForm({ payment_id: "", reason: "" });
     } catch (e: any) {
       setError(e?.message ?? "Failed to void payment");
     } finally {
@@ -198,18 +196,11 @@ export function PaymentsPanel({
               value={paymentForm.reference_number}
               onChange={(e) => setPaymentForm({ ...paymentForm, reference_number: e.target.value })}
             />
-            <input
-              className="input"
-              placeholder="Register ID"
-              value={paymentForm.register_id}
-              onChange={(e) => setPaymentForm({ ...paymentForm, register_id: e.target.value })}
-            />
-            <input
-              className="input"
-              placeholder="Register session ID"
-              value={paymentForm.register_session_id}
-              onChange={(e) => setPaymentForm({ ...paymentForm, register_session_id: e.target.value })}
-            />
+            {(registerId || sessionId) && (
+              <div className="muted">
+                Register: {registerId ?? "N/A"} | Session: {sessionId ?? "N/A"}
+              </div>
+            )}
             <button className="btn btn--primary" type="button" onClick={addPayment} disabled={loading}>
               Add payment
             </button>
@@ -281,18 +272,6 @@ export function PaymentsPanel({
               placeholder="Reason"
               value={voidForm.reason}
               onChange={(e) => setVoidForm({ ...voidForm, reason: e.target.value })}
-            />
-            <input
-              className="input"
-              placeholder="Register ID"
-              value={voidForm.register_id}
-              onChange={(e) => setVoidForm({ ...voidForm, register_id: e.target.value })}
-            />
-            <input
-              className="input"
-              placeholder="Register session ID"
-              value={voidForm.register_session_id}
-              onChange={(e) => setVoidForm({ ...voidForm, register_session_id: e.target.value })}
             />
             <button className="btn btn--ghost" type="button" onClick={voidPayment} disabled={loading}>
               Void payment

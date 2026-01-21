@@ -79,29 +79,30 @@ export function CreateProductForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form onSubmit={submit} style={{ marginTop: 16, padding: 12, border: "1px solid #ddd" }}>
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>Create Product</div>
+    <form onSubmit={submit} className="form-card" style={{ marginTop: 16 }}>
+      <div className="form-title">Create Product</div>
 
       {err && (
-        <div style={{ marginBottom: 8, color: "#9b1c1c" }}>
+        <div className="notice notice--error" style={{ marginBottom: 8 }}>
           {err}
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span>SKU</span>
-          <input value={sku} onChange={(e) => setSku(e.target.value)} required />
+      <div className="form-row">
+        <label className="form-stack">
+          <span className="form-label">SKU</span>
+          <input className="input" value={sku} onChange={(e) => setSku(e.target.value)} required />
         </label>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span>Name</span>
-          <input value={name} onChange={(e) => setName(e.target.value)} required />
+        <label className="form-stack">
+          <span className="form-label">Name</span>
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} required />
         </label>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span>Price (USD)</span>
+        <label className="form-stack">
+          <span className="form-label">Price (USD)</span>
           <input
+            className="input"
             value={priceDollars}
             onChange={(e) => setPriceDollars(e.target.value)}
             placeholder="12.99"
@@ -109,7 +110,7 @@ export function CreateProductForm({ onCreated }: { onCreated: () => void }) {
           />
         </label>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 22 }}>
+        <label className="inline-toggle" style={{ marginTop: 22 }}>
           <input
             type="checkbox"
             checked={isActive}
@@ -118,8 +119,8 @@ export function CreateProductForm({ onCreated }: { onCreated: () => void }) {
           Active
         </label>
 
-        <button type="submit" disabled={saving} style={{ padding: "8px 12px", cursor: "pointer", marginTop: 18 }}>
-          {saving ? "Saving…" : "Create"}
+        <button type="submit" disabled={saving} className="btn btn--primary" style={{ marginTop: 18 }}>
+          {saving ? "Saving..." : "Create"}
         </button>
       </div>
     </form>

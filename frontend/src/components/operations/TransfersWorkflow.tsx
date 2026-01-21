@@ -207,12 +207,16 @@ export function TransfersWorkflow({ storeId, isAuthed }: Props) {
       {notice && <div className="alert alert--success">{notice}</div>}
 
       {/* Create transfer section */}
-      <div style={{ marginBottom: 16, padding: 12, border: "1px solid #ddd", background: "#f9f9f9" }}>
+      <div className="form-card" style={{ marginBottom: 16 }}>
         <h4>Create Transfer</h4>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span>From Store</span>
-            <select value={fromStoreId} onChange={(e) => setFromStoreId(Number(e.target.value))}>
+        <div className="form-row" style={{ marginBottom: 12 }}>
+          <label className="form-stack">
+            <span className="form-label">From Store</span>
+            <select
+              className="select"
+              value={fromStoreId}
+              onChange={(e) => setFromStoreId(Number(e.target.value))}
+            >
               {stores.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -220,9 +224,13 @@ export function TransfersWorkflow({ storeId, isAuthed }: Props) {
               ))}
             </select>
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span>To Store</span>
-            <select value={toStoreId} onChange={(e) => setToStoreId(Number(e.target.value))}>
+          <label className="form-stack">
+            <span className="form-label">To Store</span>
+            <select
+              className="select"
+              value={toStoreId}
+              onChange={(e) => setToStoreId(Number(e.target.value))}
+            >
               <option value="">Select destination</option>
               {stores
                 .filter((s) => s.id !== fromStoreId)
@@ -233,17 +241,26 @@ export function TransfersWorkflow({ storeId, isAuthed }: Props) {
                 ))}
             </select>
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span>Reason</span>
-            <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Optional" />
+          <label className="form-stack">
+            <span className="form-label">Reason</span>
+            <input
+              className="input"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Optional"
+            />
           </label>
         </div>
 
         {/* Product selection */}
         <div style={{ marginBottom: 12 }}>
           <strong>Products:</strong>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <select value={newProductId} onChange={(e) => setNewProductId(Number(e.target.value))}>
+          <div className="form-actions" style={{ marginTop: 8 }}>
+            <select
+              className="select"
+              value={newProductId}
+              onChange={(e) => setNewProductId(Number(e.target.value))}
+            >
               <option value="">Select product</option>
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -257,9 +274,10 @@ export function TransfersWorkflow({ storeId, isAuthed }: Props) {
               value={newQuantity}
               onChange={(e) => setNewQuantity(e.target.value)}
               placeholder="Qty"
-              style={{ width: 80 }}
+              className="input"
+              style={{ width: 100 }}
             />
-            <button onClick={addProductToTransfer} style={{ padding: "4px 12px" }}>
+            <button onClick={addProductToTransfer} className="btn btn--primary btn--sm">
               Add
             </button>
           </div>
@@ -269,7 +287,7 @@ export function TransfersWorkflow({ storeId, isAuthed }: Props) {
               {selectedProducts.map((item) => (
                 <li key={item.productId} style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   {getProductName(item.productId)} x {item.quantity}
-                  <button onClick={() => removeProduct(item.productId)} style={{ fontSize: 12 }}>
+                  <button onClick={() => removeProduct(item.productId)} className="btn btn--ghost btn--sm">
                     Remove
                   </button>
                 </li>
@@ -285,9 +303,9 @@ export function TransfersWorkflow({ storeId, isAuthed }: Props) {
 
       {/* Transfers list */}
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <div className="form-row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
           <h4>Transfers ({transfers.length})</h4>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <select className="select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
             <option value="all">All</option>
             <option value="pending">Pending Approval</option>
             <option value="in_transit">In Transit</option>
@@ -299,69 +317,65 @@ export function TransfersWorkflow({ storeId, isAuthed }: Props) {
         ) : transfers.length === 0 ? (
           <p className="muted">No transfers found.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <table className="data-table">
             <thead>
               <tr>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>ID</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>From</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>To</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Status</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Created</th>
-                <th style={{ textAlign: "left", padding: 8, borderBottom: "1px solid #ddd" }}>Actions</th>
+                <th>ID</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {transfers.map((t) => (
                 <tr key={t.id}>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{t.id}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{getStoreName(t.from_store_id)}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{getStoreName(t.to_store_id)}</td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  <td>{t.id}</td>
+                  <td>{getStoreName(t.from_store_id)}</td>
+                  <td>{getStoreName(t.to_store_id)}</td>
+                  <td>
                     <span
-                      style={{
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                        fontSize: 12,
-                        background:
-                          t.status === "PENDING"
-                            ? "#fff3cd"
-                            : t.status === "APPROVED"
-                              ? "#d4edda"
-                              : t.status === "IN_TRANSIT"
-                                ? "#cce5ff"
-                                : t.status === "RECEIVED"
-                                  ? "#d1e7dd"
-                                  : "#f8d7da",
-                      }}
+                      className={`status-pill ${
+                        t.status === "PENDING"
+                          ? "status-pill--warning"
+                          : t.status === "APPROVED"
+                            ? "status-pill--success"
+                            : t.status === "IN_TRANSIT"
+                              ? "status-pill--info"
+                              : t.status === "RECEIVED"
+                                ? "status-pill--success"
+                                : "status-pill--danger"
+                      }`}
                     >
                       {t.status}
                     </span>
                   </td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                  <td>
                     {new Date(t.created_at).toLocaleDateString()}
                   </td>
-                  <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      <button onClick={() => loadTransferDetails(t.id)} style={{ padding: "2px 6px", fontSize: 12 }}>
+                  <td>
+                    <div className="form-actions">
+                      <button onClick={() => loadTransferDetails(t.id)} className="btn btn--ghost btn--sm">
                         View
                       </button>
                       {t.status === "PENDING" && (
                         <>
-                          <button onClick={() => performAction(t.id, "approve")} style={{ padding: "2px 6px", fontSize: 12 }}>
+                          <button onClick={() => performAction(t.id, "approve")} className="btn btn--primary btn--sm">
                             Approve
                           </button>
-                          <button onClick={() => performAction(t.id, "cancel")} style={{ padding: "2px 6px", fontSize: 12 }}>
+                          <button onClick={() => performAction(t.id, "cancel")} className="btn btn--warn btn--sm">
                             Cancel
                           </button>
                         </>
                       )}
                       {t.status === "APPROVED" && (
-                        <button onClick={() => performAction(t.id, "ship")} style={{ padding: "2px 6px", fontSize: 12 }}>
+                        <button onClick={() => performAction(t.id, "ship")} className="btn btn--primary btn--sm">
                           Ship
                         </button>
                       )}
                       {t.status === "IN_TRANSIT" && (
-                        <button onClick={() => performAction(t.id, "receive")} style={{ padding: "2px 6px", fontSize: 12 }}>
+                        <button onClick={() => performAction(t.id, "receive")} className="btn btn--primary btn--sm">
                           Receive
                         </button>
                       )}
@@ -376,25 +390,8 @@ export function TransfersWorkflow({ storeId, isAuthed }: Props) {
 
       {/* Transfer details modal */}
       {selectedTransfer && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-          onClick={() => setSelectedTransfer(null)}
-        >
-          <div
-            style={{ background: "white", padding: 24, borderRadius: 8, maxWidth: 500, width: "90%" }}
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="overlay" onClick={() => setSelectedTransfer(null)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <h3>Transfer #{selectedTransfer.id}</h3>
             <p><strong>Status:</strong> {selectedTransfer.status}</p>
             <p><strong>From:</strong> {getStoreName(selectedTransfer.from_store_id)}</p>
@@ -415,7 +412,7 @@ export function TransfersWorkflow({ storeId, isAuthed }: Props) {
               </>
             )}
 
-            <button onClick={() => setSelectedTransfer(null)} style={{ marginTop: 16 }}>
+            <button onClick={() => setSelectedTransfer(null)} className="btn btn--ghost" style={{ marginTop: 16 }}>
               Close
             </button>
           </div>

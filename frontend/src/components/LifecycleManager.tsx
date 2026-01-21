@@ -71,13 +71,13 @@ export function LifecycleManager({
   }, [refreshToken, storeId]);
 
   return (
-    <div style={{ marginTop: 20, padding: 12, border: "1px solid #ddd" }}>
-      <h3 style={{ margin: "0 0 12px", fontSize: 14, fontWeight: 600 }}>
+    <div className="form-card" style={{ marginTop: 20 }}>
+      <h3 className="form-title" style={{ marginBottom: 12 }}>
         Lifecycle Management (Approve/Post)
       </h3>
 
       {error && (
-        <div style={{ padding: 8, background: "#fff5f5", color: "#9b1c1c", fontSize: 13, marginBottom: 12 }}>
+        <div className="notice notice--error" style={{ marginBottom: 12 }}>
           {error}
         </div>
       )}
@@ -88,30 +88,30 @@ export function LifecycleManager({
         <>
           {draftTxs.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <h4 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>
+              <h4 className="form-title" style={{ margin: "0 0 8px", fontSize: 13 }}>
                 Pending Approval ({draftTxs.length})
               </h4>
-              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <table className="data-table">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #ddd" }}>
-                    <th style={{ textAlign: "left", padding: 4 }}>ID</th>
-                    <th style={{ textAlign: "left", padding: 4 }}>Type</th>
-                    <th style={{ textAlign: "right", padding: 4 }}>Qty Δ</th>
-                    <th style={{ textAlign: "left", padding: 4 }}>Note</th>
-                    <th style={{ textAlign: "left", padding: 4 }}>Action</th>
+                  <tr>
+                    <th>ID</th>
+                    <th>Type</th>
+                    <th>Qty Delta</th>
+                    <th>Note</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {draftTxs.map((tx) => (
-                    <tr key={tx.id} style={{ borderBottom: "1px solid #eee" }}>
-                      <td style={{ padding: 4 }}>{tx.id}</td>
-                      <td style={{ padding: 4 }}>{tx.type}</td>
-                      <td style={{ textAlign: "right", padding: 4 }}>{tx.quantity_delta}</td>
-                      <td style={{ padding: 4 }}>{tx.note ?? "—"}</td>
-                      <td style={{ padding: 4 }}>
+                    <tr key={tx.id}>
+                      <td>{tx.id}</td>
+                      <td>{tx.type}</td>
+                      <td>{tx.quantity_delta}</td>
+                      <td>{tx.note ?? "-"}</td>
+                      <td>
                         <button
                           onClick={() => approveTransaction(tx.id)}
-                          style={{ padding: "4px 8px", fontSize: 11 }}
+                          className="btn btn--ghost btn--sm"
                         >
                           Approve
                         </button>
@@ -125,36 +125,30 @@ export function LifecycleManager({
 
           {approvedTxs.length > 0 && (
             <div>
-              <h4 style={{ margin: "0 0 8px", fontSize: 13, fontWeight: 600 }}>
+              <h4 className="form-title" style={{ margin: "0 0 8px", fontSize: 13 }}>
                 Ready to Post ({approvedTxs.length})
               </h4>
-              <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+              <table className="data-table">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #ddd" }}>
-                    <th style={{ textAlign: "left", padding: 4 }}>ID</th>
-                    <th style={{ textAlign: "left", padding: 4 }}>Type</th>
-                    <th style={{ textAlign: "right", padding: 4 }}>Qty Δ</th>
-                    <th style={{ textAlign: "left", padding: 4 }}>Note</th>
-                    <th style={{ textAlign: "left", padding: 4 }}>Action</th>
+                  <tr>
+                    <th>ID</th>
+                    <th>Type</th>
+                    <th>Qty Delta</th>
+                    <th>Note</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {approvedTxs.map((tx) => (
-                    <tr key={tx.id} style={{ borderBottom: "1px solid #eee" }}>
-                      <td style={{ padding: 4 }}>{tx.id}</td>
-                      <td style={{ padding: 4 }}>{tx.type}</td>
-                      <td style={{ textAlign: "right", padding: 4 }}>{tx.quantity_delta}</td>
-                      <td style={{ padding: 4 }}>{tx.note ?? "—"}</td>
-                      <td style={{ padding: 4 }}>
+                    <tr key={tx.id}>
+                      <td>{tx.id}</td>
+                      <td>{tx.type}</td>
+                      <td>{tx.quantity_delta}</td>
+                      <td>{tx.note ?? "-"}</td>
+                      <td>
                         <button
                           onClick={() => postTransaction(tx.id)}
-                          style={{
-                            padding: "4px 8px",
-                            fontSize: 11,
-                            background: "#10b981",
-                            color: "white",
-                            border: "none",
-                          }}
+                          className="btn btn--primary btn--sm"
                         >
                           Post
                         </button>
@@ -167,7 +161,7 @@ export function LifecycleManager({
           )}
 
           {draftTxs.length === 0 && approvedTxs.length === 0 && (
-            <div style={{ color: "#666", fontSize: 13 }}>No pending transactions</div>
+            <div className="helper-text">No pending transactions</div>
           )}
         </>
       )}

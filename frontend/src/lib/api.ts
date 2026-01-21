@@ -123,3 +123,21 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   }
   return (await res.json()) as T;
 }
+
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: "PATCH",
+      headers: buildHeaders(true),
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error("Network error: unable to reach API.");
+  }
+  if (!res.ok) {
+    const msg = await extractErrorMessage(res);
+    throw new Error(msg);
+  }
+  return (await res.json()) as T;
+}

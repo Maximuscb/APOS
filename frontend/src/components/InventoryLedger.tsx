@@ -101,118 +101,83 @@ export function InventoryLedger({ products, refreshToken, asOf, storeId }: Props
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProductId, asOfUtcIso, refreshToken, storeId]);
 
-  const headerStyle: React.CSSProperties = {
-    display: "flex",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    gap: 12,
-    marginBottom: 10,
-  };
-
-  const titleStyle: React.CSSProperties = {
-    fontSize: 16,
-    fontWeight: 600,
-    margin: 0,
-  };
-
-  const labelStyle: React.CSSProperties = { fontSize: 12, color: "#444" };
-  const tableStyle: React.CSSProperties = {
-    width: "100%",
-    borderCollapse: "collapse",
-    border: "1px solid #ddd",
-  };
-  const thStyle: React.CSSProperties = {
-    textAlign: "left",
-    fontSize: 12,
-    padding: "8px 10px",
-    borderBottom: "1px solid #ddd",
-    background: "#f6f6f6",
-    whiteSpace: "nowrap",
-  };
-  const tdStyle: React.CSSProperties = {
-    fontSize: 12,
-    padding: "8px 10px",
-    borderBottom: "1px solid #eee",
-    verticalAlign: "top",
-  };
-
   if (products.length === 0) {
     return (
-      <div style={{ padding: 12, border: "1px solid #ddd" }}>
-        <p style={{ margin: 0, fontSize: 12, color: "#555" }}>No products yet.</p>
+      <div className="form-card">
+        <p className="helper-text" style={{ margin: 0 }}>No products yet.</p>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: 12, border: "1px solid #ddd" }}>
-      <div style={headerStyle}>
+    <div className="form-card">
+      <div className="form-row" style={{ justifyContent: "space-between" }}>
         <div>
-          <p style={titleStyle}>Inventory Ledger</p>
-          <div style={{ fontSize: 12, color: "#666" }}>
+          <p className="form-title" style={{ margin: 0 }}>Inventory Ledger</p>
+          <div className="helper-text">
             Store: {storeId}
             {asOfUtcIso ? (
               <>
                 {" "}
-                • As-Of (UTC): <code>{asOfUtcIso}</code>
+                As-Of (UTC): <code>{asOfUtcIso}</code>
               </>
             ) : null}
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label style={labelStyle}>Product</label>
+        <div className="form-actions" style={{ alignItems: "flex-end" }}>
+          <div className="form-stack">
+            <label className="form-label">Product</label>
             <select
               value={selectedProductId ?? ""}
               onChange={(e) => setSelectedProductId(e.target.value ? Number(e.target.value) : null)}
-              style={{ padding: 6, width: 260 }}
+              className="select" style={{ width: 260 }}
             >
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.sku} — {p.name}
+                  {p.sku} - {p.name}
                 </option>
               ))}
             </select>
           </div>
 
-          <button onClick={load} style={{ padding: "7px 10px", cursor: "pointer" }} disabled={loading}>
+          <button onClick={load} className="btn btn--ghost btn--sm" disabled={loading}>
             {loading ? "Loading..." : "Refresh"}
           </button>
         </div>
       </div>
 
-      {error ? <div style={{ marginBottom: 10, color: "#b00020", fontSize: 12 }}>{error}</div> : null}
+      {error ? <div className="notice notice--error" style={{ marginBottom: 10 }}>{error}</div> : null}
 
-      <table style={tableStyle}>
+      <table className="data-table">
         <thead>
           <tr>
-            <th style={thStyle}>Occurred (Local)</th>
-            <th style={thStyle}>Type</th>
-            <th style={thStyle}>Qty Δ</th>
-            <th style={thStyle}>Unit Cost</th>
-            <th style={thStyle}>Note</th>
-            <th style={thStyle}>Recorded (Local)</th>
-            <th style={thStyle}>Tx ID</th>
+            <th>Occurred (Local)</th>
+            <th>Type</th>
+            <th>Qty Delta</th>
+            <th>Unit Cost</th>
+            <th>Note</th>
+            <th>Recorded (Local)</th>
+            <th>Tx ID</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td style={tdStyle} colSpan={7}>
+              <td colSpan={7}>
                 {loading ? "Loading..." : "No transactions found."}
               </td>
             </tr>
           ) : (
             rows.map((tx) => (
               <tr key={tx.id}>
-                <td style={tdStyle}>{tx.occurred_at ? utcIsoToLocalDisplay(tx.occurred_at) : ""}</td>
-                <td style={tdStyle}>{tx.type}</td>
-                <td style={tdStyle}>{tx.quantity_delta}</td>
-                <td style={tdStyle}>{centsToDollars(tx.unit_cost_cents)}</td>
-                <td style={tdStyle}>{tx.note ?? ""}</td>
-                <td style={tdStyle}>{tx.created_at ? utcIsoToLocalDisplay(tx.created_at) : ""}</td>
-                <td style={tdStyle}>{tx.id}</td>
+                <td>{tx.occurred_at ? utcIsoToLocalDisplay(tx.occurred_at) : ""}</td>
+                <td>{tx.type}</td>
+                <td>{tx.quantity_delta}</td>
+                <td>{centsToDollars(tx.unit_cost_cents)}</td>
+                <td>{tx.note ?? ""}</td>
+                <td>{tx.created_at ? utcIsoToLocalDisplay(tx.created_at) : ""}</td>
+                <td>{tx.id}</td>
               </tr>
             ))
           )}
