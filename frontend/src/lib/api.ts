@@ -1,143 +1,83 @@
-// Overview: API client helpers for backend requests.
+const BASE_URL = import.meta.env.VITE_API_URL || '';
 
-function getStoredToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("apos_token");
-}
-
-export function setAuthToken(token: string) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem("apos_token", token);
-}
-
-export function clearAuthToken() {
-  if (typeof window === "undefined") return;
-  localStorage.removeItem("apos_token");
-}
-
-export function getAuthToken(): string | null {
-  return getStoredToken();
-}
-
-function buildHeaders(hasBody: boolean) {
-  const headers: Record<string, string> = {};
-  if (hasBody) {
-    headers["Content-Type"] = "application/json";
+class ApiError extends Error {
+  status: number;
+  detail: string;
+  constructor(title: string, detail: string, status: number) {
+    super(title);
+    this.detail = detail;
+    this.status = status;
   }
-  const token = getStoredToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  return headers;
 }
 
-/**
- * Extract error message from response, with special handling for 403 errors.
- */
-async function extractErrorMessage(res: Response): Promise<string> {
-  let msg = `HTTP ${res.status}`;
+class ApiClient {
+  private token: string | null = null;
 
-  try {
-    const data = await res.json();
-    if (data?.error) {
-      msg = data.error;
-    }
-  } catch {
-    // JSON parsing failed, use default message
-  }
-
-  // Provide user-friendly messages for common HTTP errors
-  if (res.status === 403) {
-    // Improve 403 UX - make it clear this is a permission issue
-    if (!msg.toLowerCase().includes("permission") && !msg.toLowerCase().includes("forbidden")) {
-      msg = `Forbidden: ${msg}. You may not have permission for this action.`;
-    }
-  } else if (res.status === 401) {
-    if (!msg.toLowerCase().includes("auth") && !msg.toLowerCase().includes("token")) {
-      msg = `Unauthorized: ${msg}. Please sign in again.`;
+  setToken(token: string | null) {
+    this.token = token;
+    if (token) {
+      localStorage.setItem('apos_token', token);
+    } else {
+      localStorage.removeItem('apos_token');
     }
   }
 
-  return msg;
+  getToken(): string | null {
+    if (!this.token) {
+      this.token = localStorage.getItem('apos_token');
+    }
+    return this.token;
+  }
+
+  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = this.getToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    let res: Response;
+    try {
+      res = await fetch(`${BASE_URL}${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    } catch {
+      throw new ApiError('Network Error', 'Network error: unable to reach API.', 0);
+    }
+
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const err = await res.json();
+        if (err?.error) detail = err.error;
+        else if (err?.detail) detail = err.detail;
+        else if (err?.message) detail = err.message;
+      } catch {
+        // ignore parse error
+      }
+
+      if (res.status === 403) {
+        if (!detail.toLowerCase().includes('permission') && !detail.toLowerCase().includes('forbidden')) {
+          detail = `Forbidden: ${detail}. You may not have permission for this action.`;
+        }
+      } else if (res.status === 401) {
+        if (!detail.toLowerCase().includes('auth') && !detail.toLowerCase().includes('token')) {
+          detail = `Unauthorized: ${detail}. Please sign in again.`;
+        }
+      }
+
+      throw new ApiError(res.statusText, detail, res.status);
+    }
+
+    return res.json();
+  }
+
+  get<T>(path: string) { return this.request<T>('GET', path); }
+  post<T>(path: string, body?: unknown) { return this.request<T>('POST', path, body); }
+  put<T>(path: string, body?: unknown) { return this.request<T>('PUT', path, body); }
+  patch<T>(path: string, body?: unknown) { return this.request<T>('PATCH', path, body); }
+  delete<T>(path: string) { return this.request<T>('DELETE', path); }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, { headers: buildHeaders(false) });
-  } catch {
-    throw new Error("Network error: unable to reach API.");
-  }
-  if (!res.ok) {
-    const msg = await extractErrorMessage(res);
-    throw new Error(msg);
-  }
-  return (await res.json()) as T;
-}
-
-export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      method: "POST",
-      headers: buildHeaders(true),
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new Error("Network error: unable to reach API.");
-  }
-  if (!res.ok) {
-    const msg = await extractErrorMessage(res);
-    throw new Error(msg);
-  }
-  return (await res.json()) as T;
-}
-
-export async function apiDelete(path: string): Promise<void> {
-  let res: Response;
-  try {
-    res = await fetch(path, { method: "DELETE", headers: buildHeaders(false) });
-  } catch {
-    throw new Error("Network error: unable to reach API.");
-  }
-  if (!res.ok) {
-    const msg = await extractErrorMessage(res);
-    throw new Error(msg);
-  }
-}
-
-export async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      method: "PUT",
-      headers: buildHeaders(true),
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new Error("Network error: unable to reach API.");
-  }
-  if (!res.ok) {
-    const msg = await extractErrorMessage(res);
-    throw new Error(msg);
-  }
-  return (await res.json()) as T;
-}
-
-export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      method: "PATCH",
-      headers: buildHeaders(true),
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new Error("Network error: unable to reach API.");
-  }
-  if (!res.ok) {
-    const msg = await extractErrorMessage(res);
-    throw new Error(msg);
-  }
-  return (await res.json()) as T;
-}
+export const api = new ApiClient();
+export { ApiError };
