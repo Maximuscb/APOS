@@ -94,14 +94,15 @@ def create_session(
     if not user:
         raise ValueError("User not found")
 
-    # MULTI-TENANT: Require org_id for all sessions
-    if not user.org_id:
+    # MULTI-TENANT: Require org_id for non-developer users
+    if not user.org_id and not user.is_developer:
         raise ValueError("User must belong to an organization")
 
-    # Verify organization is active
-    org = db.session.query(Organization).filter_by(id=user.org_id).first()
-    if not org or not org.is_active:
-        raise ValueError("Organization is not active")
+    # Verify organization is active (if user has one)
+    if user.org_id:
+        org = db.session.query(Organization).filter_by(id=user.org_id).first()
+        if not org or not org.is_active:
+            raise ValueError("Organization is not active")
 
     plaintext_token = generate_token()
     token_hash = hash_token(plaintext_token)

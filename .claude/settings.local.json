@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npm install:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(python -m flask db migrate:*)",
+      "Bash(python -m flask:*)",
+      "Bash(npx vite build)",
+      "Bash($env:FLASK_APP=\"wsgi.py\")"
     ]
   }
 }

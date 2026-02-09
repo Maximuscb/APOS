@@ -9,19 +9,19 @@ import { OperationsLayout } from '@/routes/operations/OperationsLayout';
 import { lazy, Suspense, type ReactNode } from 'react';
 
 // Lazy-load operations sub-pages
-const OverviewPage = lazy(() => import('@/routes/operations/OverviewPage'));
-const ProductsPage = lazy(() => import('@/routes/operations/ProductsPage'));
-const RegistersPage = lazy(() => import('@/routes/operations/RegistersPage'));
+const DashboardPage = lazy(() => import('@/routes/operations/DashboardPage').then((m) => ({ default: m.DashboardPage })));
 const DevicesPage = lazy(() => import('@/routes/operations/DevicesPage'));
-const PaymentsPage = lazy(() => import('@/routes/operations/PaymentsPage'));
-const WorkflowsPage = lazy(() => import('@/routes/operations/WorkflowsPage'));
 const DocumentsPage = lazy(() => import('@/routes/operations/DocumentsPage'));
 const AnalyticsPage = lazy(() => import('@/routes/operations/AnalyticsPage'));
-const ImportsPage = lazy(() => import('@/routes/operations/ImportsPage'));
+const ServicesPage = lazy(() => import('@/routes/operations/ServicesPage'));
 const TimekeepingPage = lazy(() => import('@/routes/operations/TimekeepingPage'));
 const AuditsPage = lazy(() => import('@/routes/operations/AuditsPage'));
 const UsersPage = lazy(() => import('@/routes/operations/UsersPage'));
-const OverridesPage = lazy(() => import('@/routes/operations/OverridesPage'));
+const SettingsPage = lazy(() => import('@/routes/operations/SettingsPage'));
+const VendorsPage = lazy(() => import('@/routes/operations/VendorsPage'));
+const CommunicationsPage = lazy(() => import('@/routes/operations/CommunicationsPage').then((m) => ({ default: m.CommunicationsPage })));
+const OrganizationPage = lazy(() => import('@/routes/operations/OrganizationPage').then((m) => ({ default: m.OrganizationPage })));
+const PromotionsPage = lazy(() => import('@/routes/operations/PromotionsPage').then((m) => ({ default: m.PromotionsPage })));
 
 function AuthGuard({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -59,26 +59,32 @@ export default function App() {
                 </AuthGuard>
               }
             >
-              <Route path="/register" element={<RegisterPage />} />
+              <Route path="/sales" element={<RegisterPage />} />
+              <Route path="/register" element={<Navigate to="/sales" replace />} />
               <Route path="/inventory" element={<InventoryPage />} />
 
               <Route path="/operations" element={<OperationsLayout />}>
-                <Route index element={<Suspense fallback={<Loading />}><OverviewPage /></Suspense>} />
-                <Route path="products" element={<Suspense fallback={<Loading />}><ProductsPage /></Suspense>} />
-                <Route path="registers" element={<Suspense fallback={<Loading />}><RegistersPage /></Suspense>} />
+                <Route index element={<Navigate to="/operations/dashboard" replace />} />
+                <Route path="dashboard" element={<Suspense fallback={<Loading />}><DashboardPage /></Suspense>} />
                 <Route path="devices" element={<Suspense fallback={<Loading />}><DevicesPage /></Suspense>} />
-                <Route path="payments" element={<Suspense fallback={<Loading />}><PaymentsPage /></Suspense>} />
-                <Route path="workflows" element={<Suspense fallback={<Loading />}><WorkflowsPage /></Suspense>} />
                 <Route path="documents" element={<Suspense fallback={<Loading />}><DocumentsPage /></Suspense>} />
                 <Route path="analytics" element={<Suspense fallback={<Loading />}><AnalyticsPage /></Suspense>} />
-                <Route path="imports" element={<Suspense fallback={<Loading />}><ImportsPage /></Suspense>} />
+                <Route path="services" element={<Suspense fallback={<Loading />}><ServicesPage /></Suspense>} />
                 <Route path="timekeeping" element={<Suspense fallback={<Loading />}><TimekeepingPage /></Suspense>} />
-                <Route path="audits" element={<Suspense fallback={<Loading />}><AuditsPage /></Suspense>} />
+                <Route path="events" element={<Suspense fallback={<Loading />}><AuditsPage /></Suspense>} />
                 <Route path="users" element={<Suspense fallback={<Loading />}><UsersPage /></Suspense>} />
-                <Route path="overrides" element={<Suspense fallback={<Loading />}><OverridesPage /></Suspense>} />
+                <Route path="vendors" element={<Suspense fallback={<Loading />}><VendorsPage /></Suspense>} />
+                <Route path="communications" element={<Suspense fallback={<Loading />}><CommunicationsPage /></Suspense>} />
+                <Route path="organization" element={<Suspense fallback={<Loading />}><OrganizationPage /></Suspense>} />
+                <Route path="promotions" element={<Suspense fallback={<Loading />}><PromotionsPage /></Suspense>} />
+                <Route path="settings" element={<Suspense fallback={<Loading />}><SettingsPage /></Suspense>} />
+                <Route path="registers" element={<Navigate to="/operations/devices" replace />} />
+                <Route path="overrides" element={<Navigate to="/operations/users" replace />} />
+                <Route path="imports" element={<Navigate to="/operations/services" replace />} />
+                <Route path="audits" element={<Navigate to="/operations/events" replace />} />
               </Route>
 
-              <Route path="*" element={<Navigate to="/operations" replace />} />
+              <Route path="*" element={<Navigate to="/operations/dashboard" replace />} />
             </Route>
           </Routes>
         </StoreProvider>

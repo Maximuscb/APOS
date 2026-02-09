@@ -53,26 +53,34 @@ function statusVariant(status: string): BadgeVariant {
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function WorkflowsPage() {
+export default function WorkflowsPage({
+  embedded = false,
+  includeReturns = true,
+}: {
+  embedded?: boolean;
+  includeReturns?: boolean;
+}) {
   const { currentStoreId: storeId } = useStore();
-  const [activeTab, setActiveTab] = useState('Returns');
+  const [activeTab, setActiveTab] = useState(includeReturns ? 'Returns' : 'Transfers');
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Workflows</h1>
-        <p className="text-sm text-muted mt-1">
-          Manage returns, transfers, and inventory counts.
-        </p>
-      </div>
+    <div className={`flex flex-col gap-6 ${embedded ? '' : 'max-w-6xl mx-auto'}`}>
+      {!embedded && (
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Workflows</h1>
+          <p className="text-sm text-muted mt-1">
+            Manage returns, transfers, and inventory counts.
+          </p>
+        </div>
+      )}
 
       <Tabs
-        tabs={['Returns', 'Transfers', 'Counts']}
+        tabs={includeReturns ? ['Returns', 'Transfers', 'Counts'] : ['Transfers', 'Counts']}
         active={activeTab}
         onChange={setActiveTab}
       />
 
-      {activeTab === 'Returns' && <ReturnsSection storeId={storeId} />}
+      {includeReturns && activeTab === 'Returns' && <ReturnsSection storeId={storeId} />}
       {activeTab === 'Transfers' && <TransfersSection storeId={storeId} />}
       {activeTab === 'Counts' && <CountsSection storeId={storeId} />}
     </div>
@@ -388,7 +396,10 @@ function TransfersSection({ storeId }: { storeId: number }) {
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
-    api.get<{ stores?: Store[]; items?: Store[] }>('/api/stores').then((d) => setStores(d.stores ?? d.items ?? [])).catch(() => {});
+    api
+      .get<{ stores?: Store[]; items?: Store[] } | Store[]>('/api/stores')
+      .then((d) => setStores(Array.isArray(d) ? d : (d.stores ?? d.items ?? [])))
+      .catch(() => {});
     api.get<{ items: Product[] }>(`/api/products?store_id=${storeId}`).then((d) => setProducts(d.items ?? [])).catch(() => {});
   }, [storeId]);
 

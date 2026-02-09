@@ -11,6 +11,7 @@ interface AuthUser {
   role: Role;
   store_id: number | null;
   is_active: boolean;
+  is_developer?: boolean;
 }
 
 interface AuthContextValue {
@@ -22,6 +23,8 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   hasRole: (minimum: Role) => boolean;
   hasPermission: (code: string) => boolean;
+  isDeveloper: boolean;
+  switchOrg: (orgId: number) => Promise<void>;
 }
 
 const roleLevel: Record<Role, number> = { cashier: 0, manager: 1, admin: 2 };
@@ -80,8 +83,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return permissions.includes(code);
   }, [permissions]);
 
+  const isDeveloper = user?.is_developer ?? false;
+
+  const switchOrg = useCallback(async (orgId: number) => {
+    const data = await api.post<{ token: string; org_id: number; org_name: string; store_id: number | null; store_name: string | null }>('/api/developer/switch-org', { org_id: orgId });
+    api.setToken(data.token);
+    // Re-validate to refresh user info and permissions for the new org context
+    const validated = await api.post<{ user: AuthUser; permissions?: string[] }>('/api/auth/validate', {});
+    setUser(validated.user);
+    setPermissions(validated.permissions ?? []);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, permissions, loading, login, pinLogin, logout, hasRole, hasPermission }}>
+    <AuthContext.Provider value={{ user, permissions, loading, login, pinLogin, logout, hasRole, hasPermission, isDeveloper, switchOrg }}>
       {children}
     </AuthContext.Provider>
   );

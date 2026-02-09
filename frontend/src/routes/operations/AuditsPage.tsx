@@ -35,7 +35,7 @@ export default function AuditsPage() {
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Audits</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Events</h1>
         <p className="text-sm text-muted mt-1">
           Review payment transactions and cash drawer events.
         </p>

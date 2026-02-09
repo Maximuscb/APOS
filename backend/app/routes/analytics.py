@@ -10,6 +10,8 @@ cashier performance, and register performance.
 from flask import Blueprint, request, jsonify, g
 
 from ..decorators import require_auth, require_permission
+from ..extensions import db
+from ..models import Sale, RegisterSession, User, Task
 from ..services import reporting_service, permission_service
 from ..services.reporting_service import ReportError
 from ..services.tenant_service import require_store_in_org, TenantAccessError
@@ -186,3 +188,43 @@ def register_performance_route():
         return jsonify({"error": str(e)}), 403
     except ReportError as e:
         return jsonify({"error": str(e)}), 400
+
+
+@analytics_bp.get("/dashboard-summary")
+@require_auth
+def dashboard_summary_route():
+    """Dashboard summary: today's sales count, open registers, pending tasks."""
+    store_id = request.args.get("store_id", type=int) or g.store_id
+    if not store_id:
+        return jsonify({"error": "store_id is required"}), 400
+
+    from datetime import datetime, timezone as tz
+    today_start = datetime.now(tz.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    sales_today = db.session.query(db.func.count(Sale.id)).filter(
+        Sale.store_id == store_id,
+        Sale.created_at >= today_start,
+        Sale.status != "VOIDED",
+    ).scalar() or 0
+
+    sales_total_cents = db.session.query(db.func.coalesce(db.func.sum(Sale.total_due_cents), 0)).filter(
+        Sale.store_id == store_id,
+        Sale.created_at >= today_start,
+        Sale.status == "COMPLETED",
+    ).scalar() or 0
+
+    open_registers = db.session.query(db.func.count(RegisterSession.id)).filter(
+        RegisterSession.status == "OPEN",
+    ).scalar() or 0
+
+    pending_tasks = db.session.query(db.func.count(Task.id)).filter(
+        Task.org_id == g.org_id,
+        Task.status == "PENDING",
+    ).scalar() or 0
+
+    return jsonify({
+        "sales_today": sales_today,
+        "sales_total_cents": sales_total_cents,
+        "open_registers": open_registers,
+        "pending_tasks": pending_tasks,
+    })

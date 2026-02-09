@@ -40,10 +40,9 @@ def require_auth(f):
         if not context:
             return jsonify({"error": "Invalid or expired token"}), 401
 
-        # MULTI-TENANT: Enforce org_id is present
-        # This should always be true for new sessions, but is a critical invariant
-        if not context.org_id:
-            # Log this as a security event - should never happen
+        # MULTI-TENANT: Enforce org_id is present (unless developer)
+        # Developer users may have null org_id until they switch into an org
+        if not context.org_id and not (context.user and context.user.is_developer):
             permission_service.log_security_event(
                 user_id=context.user.id if context.user else None,
                 event_type="TENANT_CONTEXT_MISSING",
@@ -157,6 +156,18 @@ def require_any_permission(*permission_codes):
 
         return decorated_function
     return decorator
+
+
+def require_developer(f):
+    """Require the authenticated user to be a developer."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not hasattr(g, 'current_user'):
+            return jsonify({"error": "Authentication required"}), 401
+        if not g.current_user.is_developer:
+            return jsonify({"error": "Developer access required"}), 403
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def require_all_permissions(*permission_codes):

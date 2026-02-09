@@ -26,6 +26,10 @@ class PermissionCategory:
     DOCUMENTS = "DOCUMENTS"
     REGISTERS = "REGISTERS"
     TIMEKEEPING = "TIMEKEEPING"
+    COMMUNICATIONS = "COMMUNICATIONS"
+    PROMOTIONS = "PROMOTIONS"
+    ORGANIZATION = "ORGANIZATION"
+    DEVICES = "DEVICES"
 
 
 
@@ -284,6 +288,70 @@ PERMISSION_DEFINITIONS = [
         "Full timekeeping administration",
         PermissionCategory.TIMEKEEPING
     ),
+
+    # COMMUNICATIONS PERMISSIONS
+    (
+        "VIEW_COMMUNICATIONS",
+        "View Communications",
+        "View announcements, reminders, and tasks",
+        PermissionCategory.COMMUNICATIONS
+    ),
+    (
+        "MANAGE_COMMUNICATIONS",
+        "Manage Communications",
+        "Create and edit announcements, reminders, and tasks",
+        PermissionCategory.COMMUNICATIONS
+    ),
+
+    # PROMOTIONS PERMISSIONS
+    (
+        "VIEW_PROMOTIONS",
+        "View Promotions",
+        "View promotions and discounts",
+        PermissionCategory.PROMOTIONS
+    ),
+    (
+        "MANAGE_PROMOTIONS",
+        "Manage Promotions",
+        "Create, edit, and deactivate promotions",
+        PermissionCategory.PROMOTIONS
+    ),
+
+    # ORGANIZATION PERMISSIONS
+    (
+        "VIEW_ORGANIZATION",
+        "View Organization",
+        "View organization details and structure",
+        PermissionCategory.ORGANIZATION
+    ),
+    (
+        "MANAGE_ORGANIZATION",
+        "Manage Organization",
+        "Organization-level administration (stores, structure)",
+        PermissionCategory.ORGANIZATION
+    ),
+
+    # DEVICE PERMISSIONS
+    (
+        "VIEW_DEVICE_SETTINGS",
+        "View Device Settings",
+        "View device configurations",
+        PermissionCategory.DEVICES
+    ),
+    (
+        "MANAGE_DEVICE_SETTINGS",
+        "Manage Device Settings",
+        "Configure device-level settings",
+        PermissionCategory.DEVICES
+    ),
+
+    # DEVELOPER PERMISSION
+    (
+        "DEVELOPER_ACCESS",
+        "Developer Access",
+        "Cross-organization developer access",
+        PermissionCategory.SYSTEM
+    ),
 ]
 
 
@@ -340,6 +408,14 @@ DEFAULT_ROLE_PERMISSIONS = {
         "VIEW_TIMEKEEPING",
         "APPROVE_TIME_CORRECTIONS",
         "MANAGE_TIMEKEEPING",
+        "VIEW_COMMUNICATIONS",
+        "MANAGE_COMMUNICATIONS",
+        "VIEW_PROMOTIONS",
+        "MANAGE_PROMOTIONS",
+        "VIEW_ORGANIZATION",
+        "MANAGE_ORGANIZATION",
+        "VIEW_DEVICE_SETTINGS",
+        "MANAGE_DEVICE_SETTINGS",
     ],
 
     "developer": [
@@ -386,6 +462,15 @@ DEFAULT_ROLE_PERMISSIONS = {
         "VIEW_TIMEKEEPING",
         "APPROVE_TIME_CORRECTIONS",
         "MANAGE_TIMEKEEPING",
+        "VIEW_COMMUNICATIONS",
+        "MANAGE_COMMUNICATIONS",
+        "VIEW_PROMOTIONS",
+        "MANAGE_PROMOTIONS",
+        "VIEW_ORGANIZATION",
+        "MANAGE_ORGANIZATION",
+        "VIEW_DEVICE_SETTINGS",
+        "MANAGE_DEVICE_SETTINGS",
+        "DEVELOPER_ACCESS",
     ],
 
     "manager": [
@@ -424,6 +509,12 @@ DEFAULT_ROLE_PERMISSIONS = {
         "CLOCK_IN_OUT",
         "VIEW_TIMEKEEPING",
         "APPROVE_TIME_CORRECTIONS",
+        "VIEW_COMMUNICATIONS",
+        "MANAGE_COMMUNICATIONS",
+        "VIEW_PROMOTIONS",
+        "VIEW_ORGANIZATION",
+        "VIEW_DEVICE_SETTINGS",
+        "MANAGE_DEVICE_SETTINGS",
     ],
 
     "cashier": [
@@ -433,6 +524,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         "POST_SALE",       # Finalize sales
         "PROCESS_RETURN",  # Handle returns
         "CLOCK_IN_OUT",
+        "VIEW_COMMUNICATIONS",
+        "VIEW_PROMOTIONS",
     ],
 }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStore } from '@/context/StoreContext';
 import { api } from '@/lib/api';
+import { formatMoney, formatDateTime } from '@/lib/format';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -21,6 +22,21 @@ type Register = {
   location: string | null;
   device_id: string | null;
   is_active: boolean;
+  current_session: {
+    id: number;
+    status: string;
+    user_id: number;
+    opened_at: string;
+  } | null;
+};
+
+type DrawerEvent = {
+  id: number;
+  event_type: string;
+  amount_cents: number | null;
+  reason: string | null;
+  occurred_at: string;
+  user_id: number;
 };
 
 /* ------------------------------------------------------------------ */
@@ -62,6 +78,7 @@ function RegistersTab() {
   const [registers, setRegisters] = useState<Register[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   // Create form
   const [showCreate, setShowCreate] = useState(false);
@@ -87,7 +104,7 @@ function RegistersTab() {
     setError('');
     try {
       const res = await api.get<{ registers: Register[] }>(
-        `/api/registers?store_id=${storeId}`,
+        `/api/registers/?store_id=${storeId}`,
       );
       setRegisters(res.registers ?? []);
     } catch (err: any) {
@@ -176,9 +193,33 @@ function RegistersTab() {
       await api.patch(`/api/registers/${reg.id}`, {
         is_active: !reg.is_active,
       });
+      setSuccess(`Register ${reg.register_number} ${reg.is_active ? 'deactivated' : 'activated'}.`);
       loadRegisters();
     } catch {
       // silent
+    }
+  }
+
+  async function forceClose(reg: Register) {
+    const val = window.prompt('Closing cash in dollars (leave blank for expected cash):', '');
+    if (val === null) return;
+    const body: Record<string, unknown> = {};
+    if (val.trim() !== '') {
+      const dollars = Number(val);
+      if (!Number.isFinite(dollars) || dollars < 0) {
+        setError('Invalid closing cash amount.');
+        return;
+      }
+      body.closing_cash_cents = Math.round(dollars * 100);
+    }
+    setError('');
+    setSuccess('');
+    try {
+      await api.post(`/api/registers/${reg.id}/force-close`, body);
+      setSuccess(`Forced register close completed for ${reg.register_number}.`);
+      loadRegisters();
+    } catch (err: any) {
+      setError(err?.detail ?? err?.message ?? 'Failed to force close register.');
     }
   }
 
@@ -214,6 +255,15 @@ function RegistersTab() {
       ),
     },
     {
+      key: 'session',
+      header: 'Session',
+      render: (row: Register) => (
+        row.current_session
+          ? <Badge variant="success">Open</Badge>
+          : <Badge variant="muted">No session</Badge>
+      ),
+    },
+    {
       key: 'status',
       header: 'Status',
       render: (row: Register) => (
@@ -231,6 +281,11 @@ function RegistersTab() {
           <Button variant="ghost" size="sm" onClick={() => openEdit(row)}>
             Edit
           </Button>
+          {row.current_session && (
+            <Button variant="danger" size="sm" onClick={() => forceClose(row)}>
+              Force Close
+            </Button>
+          )}
           <Button
             variant={row.is_active ? 'warning' : 'secondary'}
             size="sm"
@@ -250,6 +305,11 @@ function RegistersTab() {
       {error && (
         <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+      {success && (
+        <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+          {success}
         </div>
       )}
 
@@ -356,13 +416,138 @@ function RegistersTab() {
 /* ================================================================== */
 
 function DrawersTab() {
+  const { currentStoreId: storeId } = useStore();
+  const [registers, setRegisters] = useState<Register[]>([]);
+  const [drawerEvents, setDrawerEvents] = useState<Record<number, DrawerEvent[]>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const res = await api.get<{ registers: Register[] }>(
+          `/api/registers/?store_id=${storeId}`,
+        );
+        const regs = res.registers ?? [];
+        setRegisters(regs);
+
+        const eventMap: Record<number, DrawerEvent[]> = {};
+        await Promise.allSettled(
+          regs
+            .filter((r) => r.current_session)
+            .map(async (r) => {
+              const ev = await api.get<{ events: DrawerEvent[] }>(
+                `/api/registers/${r.id}/events?limit=5`,
+              );
+              eventMap[r.id] = ev.events ?? [];
+            }),
+        );
+        setDrawerEvents(eventMap);
+      } catch {
+        // silent
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, [storeId]);
+
+  if (loading) {
+    return <p className="text-sm text-muted">Loading drawer status...</p>;
+  }
+
+  const activeRegisters = registers.filter((r) => r.current_session);
+  const inactiveRegisters = registers.filter((r) => !r.current_session);
+
   return (
-    <Card>
-      <CardTitle>Cash Drawers</CardTitle>
-      <p className="text-sm text-muted mt-2">
-        Coming soon. Cash drawer management will be available in a future update.
-      </p>
-    </Card>
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardTitle>Active Drawers</CardTitle>
+        <p className="text-sm text-muted mt-1">
+          Registers with open sessions and their current drawer activity.
+        </p>
+
+        {activeRegisters.length === 0 ? (
+          <p className="text-sm text-muted mt-4">No registers have an open session.</p>
+        ) : (
+          <div className="overflow-x-auto mt-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-muted">
+                  <th className="py-2 pr-4 font-medium">#</th>
+                  <th className="py-2 pr-4 font-medium">Register</th>
+                  <th className="py-2 pr-4 font-medium">Session</th>
+                  <th className="py-2 pr-4 font-medium">Last Event</th>
+                  <th className="py-2 pr-4 font-medium">Amount</th>
+                  <th className="py-2 font-medium">Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeRegisters.map((reg) => {
+                  const events = drawerEvents[reg.id] ?? [];
+                  const lastEvent = events[0] ?? null;
+                  return (
+                    <tr key={reg.id} className="border-b border-border/50">
+                      <td className="py-2.5 pr-4 font-medium tabular-nums">
+                        {reg.register_number}
+                      </td>
+                      <td className="py-2.5 pr-4">{reg.name}</td>
+                      <td className="py-2.5 pr-4">
+                        <Badge variant="success">Open</Badge>
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        {lastEvent ? (
+                          <Badge
+                            variant={
+                              lastEvent.event_type === 'NO_SALE'
+                                ? 'warning'
+                                : lastEvent.event_type === 'CASH_DROP'
+                                  ? 'default'
+                                  : 'muted'
+                            }
+                          >
+                            {lastEvent.event_type}
+                          </Badge>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-4 tabular-nums">
+                        {lastEvent?.amount_cents != null
+                          ? formatMoney(lastEvent.amount_cents)
+                          : '-'}
+                      </td>
+                      <td className="py-2.5 text-muted">
+                        {lastEvent ? formatDateTime(lastEvent.occurred_at) : '-'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      {inactiveRegisters.length > 0 && (
+        <Card>
+          <CardTitle>Inactive Drawers</CardTitle>
+          <p className="text-sm text-muted mt-1">
+            Registers without an open session.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {inactiveRegisters.map((reg) => (
+              <div
+                key={reg.id}
+                className="px-3 py-2 rounded-xl border border-border bg-slate-50 text-sm text-slate-500"
+              >
+                {reg.register_number} — {reg.name}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
   );
 }
 

@@ -3,6 +3,30 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { Badge } from '@/components/ui/Badge';
+import { Dialog } from '@/components/ui/Dialog';
+import { api } from '@/lib/api';
+
+interface ActiveAnnouncement {
+  id: number;
+  title: string;
+  body: string;
+  priority: string;
+}
+
+interface ActiveReminder {
+  id: number;
+  title: string;
+  body: string;
+  repeat_type: string;
+}
+
+const priorityVariant: Record<string, 'default' | 'primary' | 'warning' | 'danger'> = {
+  LOW: 'default',
+  NORMAL: 'primary',
+  HIGH: 'warning',
+  URGENT: 'danger',
+};
 
 export function LoginPage() {
   const { login, pinLogin } = useAuth();
@@ -14,13 +38,43 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Post-login announcements
+  const [announcements, setAnnouncements] = useState<ActiveAnnouncement[]>([]);
+  const [reminders, setReminders] = useState<ActiveReminder[]>([]);
+  const [showPopup, setShowPopup] = useState(false);
+
+  async function fetchActiveComms() {
+    try {
+      const res = await api.get<{ announcements: ActiveAnnouncement[]; reminders: ActiveReminder[] }>(
+        '/api/communications/active',
+      );
+      const a = res.announcements ?? [];
+      const r = res.reminders ?? [];
+      if (a.length > 0 || r.length > 0) {
+        setAnnouncements(a);
+        setReminders(r);
+        setShowPopup(true);
+        return true;
+      }
+    } catch {
+      // Non-critical — don't block login
+    }
+    return false;
+  }
+
+  function dismissPopup() {
+    setShowPopup(false);
+    navigate('/sales', { replace: true });
+  }
+
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
     try {
       await login(username, password);
-      navigate('/register', { replace: true });
+      const hasComms = await fetchActiveComms();
+      if (!hasComms) navigate('/sales', { replace: true });
     } catch (err: any) {
       setError(err.detail || err.message || 'Login failed');
     } finally {
@@ -34,7 +88,8 @@ export function LoginPage() {
     setLoading(true);
     try {
       await pinLogin(pin);
-      navigate('/register', { replace: true });
+      const hasComms = await fetchActiveComms();
+      if (!hasComms) navigate('/sales', { replace: true });
     } catch (err: any) {
       setError(err.detail || err.message || 'PIN login failed');
     } finally {
@@ -108,6 +163,47 @@ export function LoginPage() {
           Need an account? Contact an administrator.
         </p>
       </div>
+
+      {/* Post-login announcements/reminders popup */}
+      <Dialog open={showPopup} onClose={dismissPopup} title="Notifications">
+        <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+          {announcements.length > 0 && (
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Announcements</p>
+              <div className="space-y-3">
+                {announcements.map((a) => (
+                  <div key={a.id} className="rounded-xl border border-border p-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant={priorityVariant[a.priority] ?? 'default'}>{a.priority}</Badge>
+                    </div>
+                    <h3 className="font-semibold text-slate-900 text-sm">{a.title}</h3>
+                    {a.body && <p className="text-sm text-muted mt-1">{a.body}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {reminders.length > 0 && (
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Reminders</p>
+              <div className="space-y-3">
+                {reminders.map((r) => (
+                  <div key={r.id} className="rounded-xl border border-border p-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge variant="primary">{r.repeat_type}</Badge>
+                    </div>
+                    <h3 className="font-semibold text-slate-900 text-sm">{r.title}</h3>
+                    {r.body && <p className="text-sm text-muted mt-1">{r.body}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end pt-2">
+            <Button onClick={dismissPopup}>Acknowledge</Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }

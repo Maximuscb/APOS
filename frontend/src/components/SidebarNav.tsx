@@ -9,19 +9,19 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { path: '/operations/overview', label: 'Overview' },
-  { path: '/operations/products', label: 'Products', permissions: ['VIEW_INVENTORY', 'MANAGE_PRODUCTS'] },
-  { path: '/operations/registers', label: 'Registers', permissions: ['MANAGE_REGISTER', 'CREATE_REGISTER'] },
-  { path: '/operations/devices', label: 'Devices', permissions: ['MANAGE_REGISTER'] },
-  { path: '/operations/payments', label: 'Payments', permissions: ['REFUND_PAYMENT', 'VIEW_SALES_REPORTS'] },
-  { path: '/operations/workflows', label: 'Workflows', permissions: ['PROCESS_RETURN', 'CREATE_TRANSFERS', 'CREATE_COUNTS'] },
-  { path: '/operations/documents', label: 'Documents', permissions: ['VIEW_DOCUMENTS'] },
+  { path: '/operations/dashboard', label: 'Dashboard' },
   { path: '/operations/analytics', label: 'Analytics', permissions: ['VIEW_ANALYTICS'] },
-  { path: '/operations/imports', label: 'Imports', permissions: ['CREATE_IMPORTS'] },
+  { path: '/operations/devices', label: 'Devices', permissions: ['MANAGE_REGISTER'] },
+  { path: '/operations/documents', label: 'Documents', permissions: ['VIEW_DOCUMENTS'] },
+  { path: '/operations/communications', label: 'Communications', permissions: ['VIEW_COMMUNICATIONS', 'MANAGE_COMMUNICATIONS'] },
+  { path: '/operations/promotions', label: 'Promotions', permissions: ['VIEW_PROMOTIONS', 'MANAGE_PROMOTIONS'] },
+  { path: '/operations/services', label: 'Services', permissions: ['CREATE_IMPORTS'] },
   { path: '/operations/timekeeping', label: 'Timekeeping', permissions: ['VIEW_TIMEKEEPING', 'MANAGE_TIMEKEEPING'] },
-  { path: '/operations/audits', label: 'Audits', permissions: ['VIEW_AUDIT_LOG'] },
+  { path: '/operations/events', label: 'Events', permissions: ['VIEW_AUDIT_LOG'] },
+  { path: '/operations/vendors', label: 'Vendors', minRole: 'admin' },
   { path: '/operations/users', label: 'Users', minRole: 'manager' },
-  { path: '/operations/overrides', label: 'Overrides', permissions: ['MANAGE_PERMISSIONS'] },
+  { path: '/operations/organization', label: 'Organization', permissions: ['MANAGE_ORGANIZATION'] },
+  { path: '/operations/settings', label: 'Settings', permissions: ['VIEW_STORES', 'MANAGE_STORES'] },
 ];
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {

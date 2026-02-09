@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
-import { Tabs } from '@/components/ui/Tabs';
 import { Input, Select } from '@/components/ui/Input';
+import InventoryWorkflowsPage from './InventoryWorkflowsPage';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -87,25 +87,58 @@ export function InventoryPage() {
   const [activeTab, setActiveTab] = useState('Receive');
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
-        <p className="text-sm text-muted mt-1">
-          Receive, adjust, and manage inventory for your store.
-        </p>
+    <div className="flex h-[calc(100vh-3.5rem)]">
+      <aside className="hidden md:flex w-56 shrink-0 border-r border-border bg-white overflow-y-auto">
+        <div className="w-full">
+          <div className="px-4 pt-4 pb-2">
+            <h2 className="text-sm font-semibold text-muted uppercase tracking-wider">Inventory</h2>
+          </div>
+          <div className="p-3 pt-0 space-y-1">
+          {['Receive', 'Adjust', 'Products', 'Lifecycle', 'Transfers'].map((item) => (
+            <button
+              key={item}
+              onClick={() => setActiveTab(item)}
+              className={`w-full text-left px-3 h-10 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
+                activeTab === item ? 'bg-primary-light text-primary' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {item}
+            </button>
+          ))}
+          </div>
+        </div>
+      </aside>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="max-w-6xl mx-auto flex flex-col gap-6">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
+            <p className="text-sm text-muted mt-1">
+              Receive, adjust, and manage inventory for your store.
+            </p>
+          </div>
+
+          <div className="md:hidden flex flex-wrap gap-2">
+            {['Receive', 'Adjust', 'Products', 'Lifecycle', 'Transfers'].map((item) => (
+              <button
+                key={item}
+                onClick={() => setActiveTab(item)}
+                className={`px-3 h-9 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                  activeTab === item ? 'bg-primary-light text-primary' : 'bg-slate-100 text-slate-600'
+                }`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'Receive' && <ReceiveSection storeId={storeId} />}
+          {activeTab === 'Adjust' && <AdjustSection storeId={storeId} />}
+          {activeTab === 'Products' && <ProductsSection storeId={storeId} />}
+          {activeTab === 'Lifecycle' && <LifecycleSection storeId={storeId} />}
+          {activeTab === 'Transfers' && <InventoryWorkflowsPage />}
+        </div>
       </div>
-
-      <Tabs
-        tabs={['Receive', 'Adjust', 'Products', 'Ledger', 'Lifecycle']}
-        active={activeTab}
-        onChange={setActiveTab}
-      />
-
-      {activeTab === 'Receive' && <ReceiveSection storeId={storeId} />}
-      {activeTab === 'Adjust' && <AdjustSection storeId={storeId} />}
-      {activeTab === 'Products' && <ProductsSection storeId={storeId} />}
-      {activeTab === 'Ledger' && <LedgerSection storeId={storeId} />}
-      {activeTab === 'Lifecycle' && <LifecycleSection storeId={storeId} />}
     </div>
   );
 }
@@ -967,7 +1000,7 @@ function ProductsSection({ storeId }: { storeId: number }) {
 /*  LEDGER SECTION                                                     */
 /* ================================================================== */
 
-function LedgerSection({ storeId }: { storeId: number }) {
+export function LedgerSection({ storeId }: { storeId: number }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProductId, setSelectedProductId] = useState('');
   const [asOf, setAsOf] = useState('');

@@ -1,37 +1,35 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useStore } from '@/context/StoreContext';
 import { api } from '@/lib/api';
+import { loadState, saveState } from '@/lib/storage';
 import { formatMoney } from '@/lib/format';
 import { Button } from '@/components/ui/Button';
 import { Card, CardTitle, CardDescription } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
-import { Tabs } from '@/components/ui/Tabs';
 import { Input } from '@/components/ui/Input';
+import { SalesWorkspace } from './SalesWorkspace';
 
 type Product = { id: number; sku: string; name: string; price_cents: number | null; store_id: number };
 type Register = { id: number; register_number: string; name: string; location: string | null; current_session?: { id: number; status: string; user_id: number } | null };
-type Sale = { id: number; document_number: string; status: string; store_id: number };
-type SaleLine = { id: number; product_id: number; quantity: number; unit_price_cents: number; line_total_cents: number };
-type Payment = { id: number; sale_id: number; tender_type: string; amount_cents: number; status: string };
-type PaymentSummary = { total_due_cents: number; total_paid_cents: number; remaining_cents: number; change_due_cents: number; payment_status: string };
 type TimekeepingStatus = { status: string; on_break: boolean; entry: { id: number } | null };
+type SavedSession = { registerId: number; sessionId: number; registerNumber: string; storeId: number };
 
 export function RegisterPage() {
-  const { user, hasPermission } = useAuth();
-  const { currentStoreId: storeId } = useStore();
+  const { user, hasPermission, hasRole } = useAuth();
+  const { currentStoreId: storeId, stores, setStoreId } = useStore();
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [loadingProducts, setLoadingProducts] = useState(true);
-  const [activeTab, setActiveTab] = useState('Sales');
 
-  // Register session state
+  // Register session state — restore from localStorage for instant render on workspace switch
+  const saved = loadState<SavedSession | null>('registerSession', null);
+  const hasSaved = saved !== null && saved.storeId === storeId;
   const [registers, setRegisters] = useState<Register[]>([]);
-  const [registerId, setRegisterId] = useState<number | null>(null);
-  const [sessionId, setSessionId] = useState<number | null>(null);
-  const [registerNumber, setRegisterNumber] = useState<string | null>(null);
-  const [registerLoading, setRegisterLoading] = useState(true);
+  const [registerId, setRegisterId] = useState<number | null>(hasSaved ? saved.registerId : null);
+  const [sessionId, setSessionId] = useState<number | null>(hasSaved ? saved.sessionId : null);
+  const [registerNumber, setRegisterNumber] = useState<string | null>(hasSaved ? saved.registerNumber : null);
+  const [registerLoading, setRegisterLoading] = useState(!hasSaved);
   const [showRegisterSelect, setShowRegisterSelect] = useState(false);
 
   // End shift modal
@@ -40,6 +38,10 @@ export function RegisterPage() {
 
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
   const hasManagerPermission = hasPermission('MANAGE_REGISTER');
+  const [clockStatus, setClockStatus] = useState<TimekeepingStatus | null>(null);
+  const [clockBusy, setClockBusy] = useState(false);
+  const canSwitchStore = hasRole('admin') && stores.length > 1;
+  const fullscreenAttempted = useRef(false);
 
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
@@ -55,20 +57,17 @@ export function RegisterPage() {
   }, []);
 
   async function loadProducts() {
-    setLoadingProducts(true);
-    try {
-      const result = await api.get<{ items: Product[] }>(`/api/products?store_id=${storeId}`);
-      setProducts(result.items ?? []);
-    } finally {
-      setLoadingProducts(false);
-    }
+    const result = await api.get<{ items: Product[] }>(`/api/products?store_id=${storeId}`);
+    setProducts(result.items ?? []);
   }
 
   async function initializeRegisterSession() {
     if (!user) return;
-    setRegisterLoading(true);
+    const hasExistingSession = registerId && sessionId;
+    if (!hasExistingSession) setRegisterLoading(true);
+
     try {
-      const result = await api.get<{ registers: Register[] }>(`/api/registers?store_id=${storeId}`);
+      const result = await api.get<{ registers: Register[] }>(`/api/registers/?store_id=${storeId}`);
       const regs = result.registers ?? [];
       setRegisters(regs);
 
@@ -78,12 +77,25 @@ export function RegisterPage() {
           setSessionId(reg.current_session.id);
           setRegisterNumber(reg.register_number);
           setShowRegisterSelect(false);
+          saveState('registerSession', {
+            registerId: reg.id,
+            sessionId: reg.current_session.id,
+            registerNumber: reg.register_number,
+            storeId,
+          });
           return;
         }
       }
+      // No open session found — clear any stale saved state
+      if (hasExistingSession) {
+        setRegisterId(null);
+        setSessionId(null);
+        setRegisterNumber(null);
+        saveState('registerSession', null);
+      }
       setShowRegisterSelect(true);
     } catch {
-      setShowRegisterSelect(true);
+      if (!hasExistingSession) setShowRegisterSelect(true);
     } finally {
       setRegisterLoading(false);
     }
@@ -94,6 +106,7 @@ export function RegisterPage() {
     setSessionId(sessId);
     setRegisterNumber(regNum);
     setShowRegisterSelect(false);
+    saveState('registerSession', { registerId: regId, sessionId: sessId, registerNumber: regNum, storeId });
   }
 
   function handleShiftEnded() {
@@ -102,6 +115,7 @@ export function RegisterPage() {
     setSessionId(null);
     setRegisterNumber(null);
     setShowRegisterSelect(true);
+    saveState('registerSession', null);
     initializeRegisterSession();
   }
 
@@ -109,8 +123,38 @@ export function RegisterPage() {
     if (user) {
       loadProducts();
       initializeRegisterSession();
+      loadClockStatus();
     }
   }, [user, storeId]);
+
+  useEffect(() => {
+    if (!sessionId || fullscreenAttempted.current || document.fullscreenElement) return;
+    fullscreenAttempted.current = true;
+    document.documentElement.requestFullscreen().catch(() => {});
+  }, [sessionId]);
+
+  async function loadClockStatus() {
+    try {
+      const r = await api.get<TimekeepingStatus>('/api/timekeeping/status');
+      setClockStatus(r);
+    } catch {
+      setClockStatus(null);
+    }
+  }
+
+  async function toggleClock() {
+    setClockBusy(true);
+    try {
+      if (clockStatus?.status === 'clocked_in') {
+        await api.post('/api/timekeeping/clock-out', {});
+      } else {
+        await api.post('/api/timekeeping/clock-in', { store_id: storeId });
+      }
+      await loadClockStatus();
+    } finally {
+      setClockBusy(false);
+    }
+  }
 
   if (registerLoading) {
     return (
@@ -138,8 +182,22 @@ export function RegisterPage() {
             <span className="text-sm text-muted">{user?.username}</span>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            {canSwitchStore && (
+              <select
+                value={String(storeId)}
+                onChange={(e) => setStoreId(Number(e.target.value))}
+                className="h-9 px-2 rounded-xl border border-border bg-white text-sm cursor-pointer"
+              >
+                {stores.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            )}
             <Button variant="ghost" size="sm" onClick={toggleFullscreen}>
               {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={toggleClock} disabled={clockBusy}>
+              {clockBusy ? 'Working...' : clockStatus?.status === 'clocked_in' ? 'Clock Out' : 'Clock In'}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowDrawerModal('NO_SALE')} disabled={!hasManagerPermission} title={hasManagerPermission ? 'Open drawer' : 'Manager required'}>
               Open Drawer
@@ -152,22 +210,16 @@ export function RegisterPage() {
             </Button>
           </div>
         </div>
-        <div className="mt-2">
-          <Tabs tabs={['Sales', 'Payments', 'Timekeeping']} active={activeTab} onChange={setActiveTab} />
-        </div>
       </div>
 
-      {/* Tab content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {activeTab === 'Sales' && (
-          <SalesTab products={products} storeId={storeId} loadingProducts={loadingProducts} registerId={registerId} sessionId={sessionId} />
-        )}
-        {activeTab === 'Payments' && (
-          <PaymentsTab registerId={registerId} sessionId={sessionId} />
-        )}
-        {activeTab === 'Timekeeping' && (
-          <TimekeepingTab storeId={storeId} />
-        )}
+        <SalesWorkspace
+          userId={user?.id ?? 0}
+          storeId={storeId}
+          products={products}
+          registerId={registerId}
+          sessionId={sessionId}
+        />
       </div>
 
       {/* End Shift Modal */}
@@ -272,335 +324,6 @@ function RegisterSelectView({ registers, userId, onSessionStarted }: {
 
 // ─── Sales Tab ───────────────────────────────────────────────────────────────
 
-function SalesTab({ products, storeId, loadingProducts, registerId, sessionId }: {
-  products: Product[];
-  storeId: number;
-  loadingProducts: boolean;
-  registerId: number | null;
-  sessionId: number | null;
-}) {
-  const [currentSale, setCurrentSale] = useState<Sale | null>(null);
-  const [lines, setLines] = useState<SaleLine[]>([]);
-  const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
-  const [quantity, setQuantity] = useState(1);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function createNewSale() {
-    setLoading(true);
-    setError(null);
-    try {
-      const payload: Record<string, unknown> = { store_id: storeId };
-      if (registerId) payload.register_id = registerId;
-      if (sessionId) payload.register_session_id = sessionId;
-      const result = await api.post<{ sale: Sale }>('/api/sales/', payload);
-      setCurrentSale(result.sale);
-      setLines([]);
-    } catch (e: any) {
-      setError(e?.detail || e?.message || 'Failed to create sale');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function addLineToSale() {
-    if (!currentSale || !selectedProductId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await api.post<{ line: SaleLine }>(`/api/sales/${currentSale.id}/lines`, { product_id: selectedProductId, quantity });
-      setLines((prev) => {
-        const idx = prev.findIndex((l) => l.id === result.line.id);
-        if (idx >= 0) { const updated = [...prev]; updated[idx] = result.line; return updated; }
-        return [...prev, result.line];
-      });
-      setQuantity(1);
-    } catch (e: any) {
-      setError(e?.detail || e?.message || 'Failed to add line');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function postSale() {
-    if (!currentSale) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await api.post<{ sale: Sale }>(`/api/sales/${currentSale.id}/post`, {});
-      setCurrentSale(null);
-      setLines([]);
-    } catch (e: any) {
-      setError(e?.detail || e?.message || 'Failed to post sale');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const total = lines.reduce((sum, l) => sum + l.line_total_cents, 0);
-
-  if (loadingProducts) {
-    return <div className="text-center text-muted py-8">Loading catalog...</div>;
-  }
-
-  if (!currentSale) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <Card className="text-center max-w-sm">
-          <CardTitle>Start a Sale</CardTitle>
-          <CardDescription>Create a new sale to begin scanning items.</CardDescription>
-          <div className="mt-4">
-            <Button onClick={createNewSale} disabled={loading}>Open New Sale</Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      {error && <div className="lg:col-span-3 p-3 bg-red-50 text-red-700 text-sm rounded-xl">{error}</div>}
-
-      {/* Left: Add items + cart */}
-      <div className="lg:col-span-2 space-y-4">
-        <Card>
-          <div className="flex items-center gap-2 mb-3">
-            <Badge variant="primary">{currentSale.status}</Badge>
-            <Badge>{currentSale.document_number}</Badge>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            <select
-              className="h-11 px-3 rounded-xl border border-border bg-white text-sm flex-1 min-w-[200px]"
-              value={selectedProductId ?? ''}
-              onChange={(e) => setSelectedProductId(Number(e.target.value))}
-            >
-              <option value="">Select product</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} - {p.price_cents ? formatMoney(p.price_cents) : 'N/A'}</option>
-              ))}
-            </select>
-            <input
-              className="h-11 w-20 px-3 rounded-xl border border-border bg-white text-sm text-center"
-              type="number" min="1" value={quantity}
-              onChange={(e) => setQuantity(Number(e.target.value))}
-            />
-            <Button onClick={addLineToSale} disabled={loading || !selectedProductId}>Add Item</Button>
-          </div>
-        </Card>
-
-        <Card padding={false}>
-          <div className="grid grid-cols-4 gap-0 bg-slate-50 border-b border-border px-4 py-3 text-sm font-medium text-muted">
-            <span>Item</span><span>Qty</span><span>Price</span><span className="text-right">Total</span>
-          </div>
-          {lines.length === 0 ? (
-            <div className="px-4 py-8 text-center text-muted">No items in cart yet.</div>
-          ) : lines.map((line) => {
-            const prod = products.find((p) => p.id === line.product_id);
-            return (
-              <div key={line.id} className="grid grid-cols-4 gap-0 px-4 py-3 border-b border-border last:border-0 text-sm">
-                <span className="font-medium">{prod?.name ?? 'Unknown'}</span>
-                <span>{line.quantity}</span>
-                <span>{formatMoney(line.unit_price_cents)}</span>
-                <span className="text-right font-medium">{formatMoney(line.line_total_cents)}</span>
-              </div>
-            );
-          })}
-        </Card>
-      </div>
-
-      {/* Right: Summary */}
-      <div className="space-y-4">
-        <Card>
-          <CardTitle>Order Summary</CardTitle>
-          <div className="mt-3 space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-muted">Items</span><span>{lines.reduce((s, l) => s + l.quantity, 0)}</span></div>
-            <div className="flex justify-between"><span className="text-muted">Subtotal</span><span>{formatMoney(total)}</span></div>
-            <div className="flex justify-between text-lg font-semibold border-t border-border pt-2 mt-2">
-              <span>Total</span><span>{formatMoney(total)}</span>
-            </div>
-          </div>
-          <p className="text-xs text-muted mt-3">Posting requires on-hand stock and a received cost basis for each item.</p>
-          <div className="mt-4 space-y-2">
-            <Button onClick={postSale} disabled={loading || lines.length === 0} className="w-full">Post Sale</Button>
-            <Button variant="ghost" onClick={() => { setCurrentSale(null); setLines([]); }} className="w-full">Cancel Sale</Button>
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-// ─── Payments Tab ────────────────────────────────────────────────────────────
-
-function PaymentsTab({ registerId, sessionId }: { registerId: number | null; sessionId: number | null }) {
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [saleId, setSaleId] = useState('');
-  const [includeVoided, setIncludeVoided] = useState(false);
-  const [salePayments, setSalePayments] = useState<Payment[]>([]);
-  const [saleSummary, setSaleSummary] = useState<PaymentSummary | null>(null);
-
-  const [paymentForm, setPaymentForm] = useState({ sale_id: '', tender_type: 'CASH', amount_cents: 0, reference_number: '' });
-  const [voidForm, setVoidForm] = useState({ payment_id: '', reason: '' });
-  const [tenderSummary, setTenderSummary] = useState<Record<string, number> | null>(null);
-  const [tenderSessionId, setTenderSessionId] = useState('');
-
-  async function addPayment() {
-    setLoading(true); setError(null);
-    try {
-      await api.post('/api/payments/', {
-        sale_id: Number(paymentForm.sale_id), tender_type: paymentForm.tender_type,
-        amount_cents: Number(paymentForm.amount_cents), reference_number: paymentForm.reference_number || null,
-        register_id: registerId ?? null, register_session_id: sessionId ?? null,
-      });
-      setPaymentForm({ sale_id: '', tender_type: 'CASH', amount_cents: 0, reference_number: '' });
-    } catch (e: any) { setError(e?.detail || e?.message || 'Failed'); } finally { setLoading(false); }
-  }
-
-  async function loadSalePayments() {
-    if (!saleId) return;
-    setLoading(true); setError(null);
-    try {
-      const result = await api.get<{ payments: Payment[]; summary: PaymentSummary }>(`/api/payments/sales/${saleId}?include_voided=${includeVoided}`);
-      setSalePayments(result.payments ?? []);
-      setSaleSummary(result.summary ?? null);
-    } catch (e: any) { setError(e?.detail || e?.message || 'Failed'); } finally { setLoading(false); }
-  }
-
-  async function voidPayment() {
-    if (!voidForm.payment_id) return;
-    setLoading(true); setError(null);
-    try {
-      await api.post(`/api/payments/${voidForm.payment_id}/void`, { reason: voidForm.reason, register_id: registerId ?? null, register_session_id: sessionId ?? null });
-      setVoidForm({ payment_id: '', reason: '' });
-    } catch (e: any) { setError(e?.detail || e?.message || 'Failed'); } finally { setLoading(false); }
-  }
-
-  async function loadTenderSummary() {
-    if (!tenderSessionId) return;
-    setLoading(true); setError(null);
-    try {
-      const result = await api.get<{ tender_totals_cents: Record<string, number> }>(`/api/payments/sessions/${tenderSessionId}/tender-summary`);
-      setTenderSummary(result.tender_totals_cents ?? null);
-    } catch (e: any) { setError(e?.detail || e?.message || 'Failed'); } finally { setLoading(false); }
-  }
-
-  return (
-    <div className="space-y-4">
-      {error && <div className="p-3 bg-red-50 text-red-700 text-sm rounded-xl">{error}</div>}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardTitle>Add Payment</CardTitle>
-          <div className="mt-3 space-y-3">
-            <Input label="Sale ID" value={paymentForm.sale_id} onChange={(e) => setPaymentForm({ ...paymentForm, sale_id: e.target.value })} placeholder="Sale ID" />
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-slate-700">Tender Type</label>
-              <select className="h-11 px-3 rounded-xl border border-border bg-white text-sm" value={paymentForm.tender_type} onChange={(e) => setPaymentForm({ ...paymentForm, tender_type: e.target.value })}>
-                <option value="CASH">CASH</option><option value="CARD">CARD</option><option value="CHECK">CHECK</option><option value="GIFT_CARD">GIFT_CARD</option><option value="STORE_CREDIT">STORE_CREDIT</option>
-              </select>
-            </div>
-            <Input label="Amount (cents)" type="number" value={String(paymentForm.amount_cents)} onChange={(e) => setPaymentForm({ ...paymentForm, amount_cents: Number(e.target.value) })} />
-            <Input label="Reference #" value={paymentForm.reference_number} onChange={(e) => setPaymentForm({ ...paymentForm, reference_number: e.target.value })} placeholder="Optional" />
-            {(registerId || sessionId) && <p className="text-xs text-muted">Register: {registerId ?? 'N/A'} | Session: {sessionId ?? 'N/A'}</p>}
-            <Button onClick={addPayment} disabled={loading} className="w-full">Add Payment</Button>
-          </div>
-        </Card>
-
-        <Card>
-          <CardTitle>Sale Payments</CardTitle>
-          <div className="mt-3 space-y-3">
-            <Input label="Sale ID" value={saleId} onChange={(e) => setSaleId(e.target.value)} placeholder="Sale ID" />
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeVoided} onChange={(e) => setIncludeVoided(e.target.checked)} /> Include voided</label>
-            <Button variant="secondary" onClick={loadSalePayments} disabled={loading} className="w-full">Load Payments</Button>
-            {saleSummary && (
-              <div className="bg-slate-50 rounded-xl p-3 space-y-1 text-sm">
-                <div className="flex justify-between"><span className="text-muted">Status</span><Badge>{saleSummary.payment_status}</Badge></div>
-                <div className="flex justify-between"><span className="text-muted">Remaining</span><span>{formatMoney(saleSummary.remaining_cents)}</span></div>
-                <div className="flex justify-between"><span className="text-muted">Change due</span><span>{formatMoney(saleSummary.change_due_cents)}</span></div>
-              </div>
-            )}
-            {salePayments.length > 0 && (
-              <div className="space-y-1">
-                {salePayments.map((p) => (
-                  <div key={p.id} className="flex justify-between text-sm p-2 bg-slate-50 rounded-lg">
-                    <span>{p.tender_type} #{p.id}</span><span>{formatMoney(p.amount_cents)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </Card>
-
-        <Card>
-          <CardTitle>Void Payment</CardTitle>
-          <div className="mt-3 space-y-3">
-            <Input label="Payment ID" value={voidForm.payment_id} onChange={(e) => setVoidForm({ ...voidForm, payment_id: e.target.value })} />
-            <Input label="Reason" value={voidForm.reason} onChange={(e) => setVoidForm({ ...voidForm, reason: e.target.value })} />
-            <Button variant="danger" onClick={voidPayment} disabled={loading} className="w-full">Void Payment</Button>
-          </div>
-        </Card>
-
-        <Card>
-          <CardTitle>Tender Summary</CardTitle>
-          <div className="mt-3 space-y-3">
-            <Input label="Session ID" value={tenderSessionId} onChange={(e) => setTenderSessionId(e.target.value)} placeholder="Register session ID" />
-            <Button variant="secondary" onClick={loadTenderSummary} disabled={loading} className="w-full">Load Tender Totals</Button>
-            {tenderSummary && (
-              <div className="space-y-1">
-                {Object.entries(tenderSummary).map(([k, v]) => (
-                  <div key={k} className="flex justify-between text-sm p-2 bg-slate-50 rounded-lg"><span>{k}</span><span>{formatMoney(v)}</span></div>
-                ))}
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-// ─── Timekeeping Tab ─────────────────────────────────────────────────────────
-
-function TimekeepingTab({ storeId }: { storeId: number }) {
-  const [status, setStatus] = useState<TimekeepingStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function loadStatus() {
-    try { const r = await api.get<TimekeepingStatus>('/api/timekeeping/status'); setStatus(r); } catch (e: any) { setError(e?.detail || e?.message || 'Failed'); }
-  }
-
-  useEffect(() => { loadStatus(); }, []);
-
-  async function doAction(endpoint: string, body: Record<string, unknown> = {}) {
-    setLoading(true); setError(null);
-    try { await api.post(endpoint, body); await loadStatus(); } catch (e: any) { setError(e?.detail || e?.message || 'Failed'); } finally { setLoading(false); }
-  }
-
-  return (
-    <Card className="max-w-md">
-      <div className="flex items-center justify-between mb-4">
-        <CardTitle>Timekeeping</CardTitle>
-        <Button variant="ghost" size="sm" onClick={loadStatus}>Refresh</Button>
-      </div>
-      {error && <div className="p-3 bg-red-50 text-red-700 text-sm rounded-xl mb-3">{error}</div>}
-      <div className="mb-4">
-        <Badge variant={status?.status === 'clocked_in' ? 'success' : 'muted'}>{status?.status ?? 'Unknown'}</Badge>
-        {status?.on_break && <Badge variant="warning" className="ml-2">On Break</Badge>}
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Button onClick={() => doAction('/api/timekeeping/clock-in', { store_id: storeId })} disabled={loading}>Clock In</Button>
-        <Button variant="secondary" onClick={() => doAction('/api/timekeeping/clock-out')} disabled={loading}>Clock Out</Button>
-        <Button variant="secondary" onClick={() => doAction('/api/timekeeping/break/start')} disabled={loading}>Start Break</Button>
-        <Button variant="secondary" onClick={() => doAction('/api/timekeeping/break/end')} disabled={loading}>End Break</Button>
-      </div>
-    </Card>
-  );
-}
-
-// ─── End Shift Dialog ────────────────────────────────────────────────────────
-
 function EndShiftDialog({ sessionId, registerNumber, onClose, onShiftEnded }: {
   sessionId: number; registerNumber: string; onClose: () => void; onShiftEnded: () => void;
 }) {
@@ -697,3 +420,4 @@ function DrawerEventDialog({ eventType, sessionId, hasManagerPermission, onClose
     </Dialog>
   );
 }
+

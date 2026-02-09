@@ -72,7 +72,7 @@ export default function RegistersPage() {
     setError('');
     try {
       const res = await api.get<{ registers: Register[] }>(
-        `/api/registers?store_id=${storeId}`,
+        `/api/registers/?store_id=${storeId}`,
       );
       setRegisters(res.registers ?? []);
     } catch (err: any) {

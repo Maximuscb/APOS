@@ -34,10 +34,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       saveState('storeId', user.store_id);
     }
 
-    api.get<{ stores: StoreInfo[] }>('/api/stores')
+    api.get<{ stores?: StoreInfo[] } | StoreInfo[]>('/api/stores')
       .then((data) => {
-        if (data.stores && data.stores.length > 0) {
-          setStores(data.stores);
+        const resolvedStores = Array.isArray(data) ? data : (data.stores ?? []);
+        if (resolvedStores.length > 0) {
+          setStores(resolvedStores);
+          const hasCurrent = resolvedStores.some((s) => s.id === currentStoreId);
+          if (!hasCurrent) {
+            const nextStoreId = user.store_id ?? resolvedStores[0].id;
+            setCurrentStoreIdState(nextStoreId);
+            saveState('storeId', nextStoreId);
+          }
         }
       })
       .catch(() => {
@@ -45,7 +52,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setStores([{ id: user.store_id, name: `Store ${user.store_id}` }]);
         }
       });
-  }, [user]);
+  }, [user, currentStoreId]);
 
   const setStoreId = (id: number) => {
     setCurrentStoreIdState(id);

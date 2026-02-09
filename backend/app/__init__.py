@@ -46,6 +46,10 @@ def create_app() -> Flask:
     from .routes.documents import documents_bp  # Unified documents
     from .routes.analytics import analytics_bp  # Analytics
     from .routes.imports import imports_bp  # Imports
+    from .routes.developer import developer_bp  # Developer tools
+    from .routes.settings import settings_bp  # Settings (org + device)
+    from .routes.communications import communications_bp  # Communications
+    from .routes.promotions import promotions_bp  # Promotions
 
     app.register_blueprint(system_bp)
     app.register_blueprint(products_bp)
@@ -69,6 +73,10 @@ def create_app() -> Flask:
     app.register_blueprint(documents_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(imports_bp)
+    app.register_blueprint(developer_bp)
+    app.register_blueprint(settings_bp)
+    app.register_blueprint(communications_bp)
+    app.register_blueprint(promotions_bp)
 
     @app.after_request
     def add_cors_headers(response):

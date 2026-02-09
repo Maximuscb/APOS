@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useStore } from '@/context/StoreContext';
+import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { Card, CardTitle } from '@/components/ui/Card';
@@ -7,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input, Select } from '@/components/ui/Input';
+import { Tabs } from '@/components/ui/Tabs';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -28,21 +30,100 @@ type Role = {
   name: string;
   description: string | null;
 };
+type Permission = { code: string; name?: string; category?: string };
+type Override = {
+  id: number;
+  user_id: number;
+  permission_code: string;
+  override_type: 'GRANT' | 'DENY';
+  is_active: boolean;
+};
+
+/* ------------------------------------------------------------------ */
+/*  Permission workspace grouping                                      */
+/* ------------------------------------------------------------------ */
+
+const WORKSPACE_GROUPS: Record<string, { label: string; categories: string[] }> = {
+  sales: {
+    label: 'Sales',
+    categories: ['SALES', 'REGISTERS'],
+  },
+  inventory: {
+    label: 'Inventory',
+    categories: ['INVENTORY'],
+  },
+  documents: {
+    label: 'Documents',
+    categories: ['DOCUMENTS'],
+  },
+  communications: {
+    label: 'Communications',
+    categories: ['COMMUNICATIONS', 'PROMOTIONS'],
+  },
+  timekeeping: {
+    label: 'Timekeeping',
+    categories: ['TIMEKEEPING'],
+  },
+  management: {
+    label: 'Management',
+    categories: ['USERS', 'ORGANIZATION', 'DEVICES', 'SYSTEM'],
+  },
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  SALES: 'Sales',
+  REGISTERS: 'Registers',
+  INVENTORY: 'Inventory',
+  DOCUMENTS: 'Documents',
+  COMMUNICATIONS: 'Communications',
+  PROMOTIONS: 'Promotions',
+  TIMEKEEPING: 'Timekeeping',
+  USERS: 'Users',
+  ORGANIZATION: 'Organization',
+  DEVICES: 'Devices',
+  SYSTEM: 'System',
+};
+
+function groupPermissions(permissions: Permission[]) {
+  const grouped: Record<string, Record<string, Permission[]>> = {};
+  for (const ws of Object.keys(WORKSPACE_GROUPS)) {
+    grouped[ws] = {};
+    for (const cat of WORKSPACE_GROUPS[ws].categories) {
+      grouped[ws][cat] = [];
+    }
+  }
+  for (const p of permissions) {
+    const cat = p.category ?? 'SYSTEM';
+    for (const [ws, config] of Object.entries(WORKSPACE_GROUPS)) {
+      if (config.categories.includes(cat)) {
+        if (!grouped[ws][cat]) grouped[ws][cat] = [];
+        grouped[ws][cat].push(p);
+        break;
+      }
+    }
+  }
+  return grouped;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
 export default function UsersPage() {
-  const { currentStoreId: storeId } = useStore();
+  const { currentStoreId: storeId, stores } = useStore();
+  const { hasRole } = useAuth();
+  const isAdmin = hasRole('admin');
 
   // Users list
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [showInactive, setShowInactive] = useState(false);
+  const [filterStoreId, setFilterStoreId] = useState<number | null>(null);
+  const [orgWide, setOrgWide] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [permissionsCatalog, setPermissionsCatalog] = useState<Permission[]>([]);
 
   // Create form
   const [newUsername, setNewUsername] = useState('');
@@ -56,21 +137,27 @@ export default function UsersPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [assignRole, setAssignRole] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
+  const [overrides, setOverrides] = useState<Override[]>([]);
+  const [overridePerm, setOverridePerm] = useState('');
+  const [overrideType, setOverrideType] = useState<'GRANT' | 'DENY'>('GRANT');
+  const [permWorkspace, setPermWorkspace] = useState('sales');
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await api.get<{ users: User[] }>(
-        `/api/admin/users?include_inactive=${showInactive}`,
-      );
+      let url = `/api/admin/users?include_inactive=${showInactive}`;
+      if (!orgWide && (filterStoreId ?? storeId)) {
+        url += `&store_id=${filterStoreId ?? storeId}`;
+      }
+      const res = await api.get<{ users: User[] }>(url);
       setUsers(res.users ?? []);
     } catch (err: any) {
       setError(err?.detail ?? err?.message ?? 'Failed to load users.');
     } finally {
       setLoading(false);
     }
-  }, [showInactive]);
+  }, [showInactive, orgWide, filterStoreId, storeId]);
 
   const loadRoles = useCallback(async () => {
     try {
@@ -81,10 +168,20 @@ export default function UsersPage() {
     }
   }, []);
 
+  const loadPermissions = useCallback(async () => {
+    try {
+      const res = await api.get<{ permissions: Permission[] }>('/api/admin/permissions');
+      setPermissionsCatalog(res.permissions ?? []);
+    } catch {
+      setPermissionsCatalog([]);
+    }
+  }, []);
+
   useEffect(() => {
     loadUsers();
     loadRoles();
-  }, [loadUsers, loadRoles]);
+    loadPermissions();
+  }, [loadUsers, loadRoles, loadPermissions]);
 
   async function handleCreate() {
     if (!newUsername.trim() || !newEmail.trim() || !newPassword.trim()) {
@@ -123,6 +220,8 @@ export default function UsersPage() {
       const res = await api.get<{ user: User }>(`/api/admin/users/${userId}`);
       setSelectedUser(res.user);
       setAssignRole('');
+      const o = await api.get<{ overrides: Override[] }>(`/api/admin/users/${userId}/permission-overrides`);
+      setOverrides(o.overrides ?? []);
     } catch (err: any) {
       setError(err?.detail ?? err?.message ?? 'Failed to load user details.');
     } finally {
@@ -199,12 +298,63 @@ export default function UsersPage() {
     }
   }
 
+  async function addOverride() {
+    if (!selectedUser || !overridePerm) return;
+    setActionBusy(true);
+    setError('');
+    try {
+      await api.post(`/api/admin/users/${selectedUser.id}/permission-overrides`, {
+        permission_code: overridePerm,
+        override_type: overrideType,
+      });
+      setOverridePerm('');
+      openDetails(selectedUser.id);
+    } catch (err: any) {
+      setError(err?.detail ?? err?.message ?? 'Failed to save permission override.');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function revokeOverride(code: string) {
+    if (!selectedUser) return;
+    setActionBusy(true);
+    setError('');
+    try {
+      await api.delete(`/api/admin/users/${selectedUser.id}/permission-overrides/${encodeURIComponent(code)}`);
+      openDetails(selectedUser.id);
+    } catch (err: any) {
+      setError(err?.detail ?? err?.message ?? 'Failed to revoke permission override.');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  // Group user permissions by workspace for display
+  const userPermsByWorkspace = selectedUser?.permissions
+    ? groupPermissions(
+        selectedUser.permissions.map((code) => {
+          const cat = permissionsCatalog.find((p) => p.code === code);
+          return { code, name: cat?.name, category: cat?.category };
+        }),
+      )
+    : null;
+
+  // Group catalog permissions by workspace for override picker
+  const catalogByWorkspace = groupPermissions(permissionsCatalog);
+
+  // Store name lookup
+  const storeNameMap: Record<number, string> = {};
+  for (const s of stores) {
+    storeNameMap[s.id] = s.name;
+  }
+
   return (
     <div className="flex flex-col gap-6 max-w-6xl mx-auto">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Users</h1>
         <p className="text-sm text-muted mt-1">
-          Manage user accounts, roles, and permissions.
+          Manage accounts, roles, and direct permission overrides in one place.
         </p>
       </div>
 
@@ -262,17 +412,47 @@ export default function UsersPage() {
 
       {/* Users Table */}
       <Card padding={false}>
-        <div className="p-5 pb-0 flex items-center justify-between">
+        <div className="p-5 pb-0 flex items-center justify-between flex-wrap gap-3">
           <CardTitle>Users</CardTitle>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
-              className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
-            />
-            <span className="text-sm text-slate-600">Show inactive</span>
-          </label>
+          <div className="flex items-center gap-4 flex-wrap">
+            {/* Admin store filter */}
+            {isAdmin && stores.length > 1 && (
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={orgWide}
+                    onChange={(e) => {
+                      setOrgWide(e.target.checked);
+                      if (e.target.checked) setFilterStoreId(null);
+                    }}
+                    className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                  />
+                  <span className="text-sm text-slate-600">All stores</span>
+                </label>
+                {!orgWide && (
+                  <select
+                    className="rounded-lg border border-border px-2 py-1 text-sm"
+                    value={filterStoreId ?? storeId ?? ''}
+                    onChange={(e) => setFilterStoreId(Number(e.target.value))}
+                  >
+                    {stores.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+              />
+              <span className="text-sm text-slate-600">Show inactive</span>
+            </label>
+          </div>
         </div>
 
         <div className="mt-4">
@@ -287,6 +467,8 @@ export default function UsersPage() {
                   <tr className="border-b border-border text-left text-muted">
                     <th className="py-2 px-5 font-medium">Username</th>
                     <th className="py-2 px-3 font-medium">Email</th>
+                    {orgWide && <th className="py-2 px-3 font-medium">Store</th>}
+                    <th className="py-2 px-3 font-medium">Roles</th>
                     <th className="py-2 px-3 font-medium">Status</th>
                     <th className="py-2 px-5 font-medium text-right">Actions</th>
                   </tr>
@@ -296,6 +478,21 @@ export default function UsersPage() {
                     <tr key={u.id} className="border-b border-border/50 hover:bg-slate-50">
                       <td className="py-2.5 px-5 font-medium">{u.username}</td>
                       <td className="py-2.5 px-3 text-muted">{u.email}</td>
+                      {orgWide && (
+                        <td className="py-2.5 px-3 text-muted">
+                          {u.store_id ? (storeNameMap[u.store_id] ?? `#${u.store_id}`) : '-'}
+                        </td>
+                      )}
+                      <td className="py-2.5 px-3">
+                        <div className="flex gap-1 flex-wrap">
+                          {u.roles?.map((r) => (
+                            <Badge key={r} variant="primary">{r}</Badge>
+                          ))}
+                          {(!u.roles || u.roles.length === 0) && (
+                            <span className="text-muted text-xs">None</span>
+                          )}
+                        </div>
+                      </td>
                       <td className="py-2.5 px-3">
                         <Badge variant={u.is_active ? 'success' : 'muted'}>
                           {u.is_active ? 'Active' : 'Inactive'}
@@ -362,8 +559,12 @@ export default function UsersPage() {
                 <p className="text-sm mt-1">{selectedUser.email}</p>
               </div>
               <div>
-                <p className="text-xs text-muted font-medium uppercase tracking-wider">Store ID</p>
-                <p className="text-sm mt-1">{selectedUser.store_id ?? '-'}</p>
+                <p className="text-xs text-muted font-medium uppercase tracking-wider">Store</p>
+                <p className="text-sm mt-1">
+                  {selectedUser.store_id
+                    ? (storeNameMap[selectedUser.store_id] ?? `#${selectedUser.store_id}`)
+                    : '-'}
+                </p>
               </div>
               <div>
                 <p className="text-xs text-muted font-medium uppercase tracking-wider">Status</p>
@@ -427,17 +628,101 @@ export default function UsersPage() {
               </div>
             </div>
 
-            {/* Permissions */}
-            {selectedUser.permissions && selectedUser.permissions.length > 0 && (
-              <div>
-                <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Permissions</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedUser.permissions.map((perm) => (
-                    <Badge key={perm} variant="muted">{perm}</Badge>
-                  ))}
+            {/* Permissions — Workspace-scoped tabs */}
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Permissions</p>
+              <Tabs
+                tabs={Object.values(WORKSPACE_GROUPS).map((g) => g.label)}
+                active={WORKSPACE_GROUPS[permWorkspace]?.label ?? 'Sales'}
+                onChange={(tab) => {
+                  const key = Object.entries(WORKSPACE_GROUPS).find(([, v]) => v.label === tab)?.[0];
+                  if (key) setPermWorkspace(key);
+                }}
+              />
+              {userPermsByWorkspace && (
+                <div className="mt-3 space-y-3">
+                  {WORKSPACE_GROUPS[permWorkspace]?.categories.map((cat) => {
+                    const perms = userPermsByWorkspace[permWorkspace]?.[cat] ?? [];
+                    if (perms.length === 0) return null;
+                    return (
+                      <div key={cat}>
+                        <p className="text-xs font-medium text-slate-500 mb-1">{CATEGORY_LABELS[cat] ?? cat}</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {perms.map((p) => (
+                            <Badge key={p.code} variant="muted">{p.name ?? p.code}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {WORKSPACE_GROUPS[permWorkspace]?.categories.every(
+                    (cat) => (userPermsByWorkspace[permWorkspace]?.[cat] ?? []).length === 0,
+                  ) && (
+                    <p className="text-sm text-muted">No permissions in this workspace.</p>
+                  )}
+                </div>
+              )}
+              {!userPermsByWorkspace && (
+                <p className="text-sm text-muted mt-2">No permissions data.</p>
+              )}
+            </div>
+
+            {/* Permission Overrides */}
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Permission Overrides</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <Select
+                  label=""
+                  value={overridePerm}
+                  onChange={(e) => setOverridePerm(e.target.value)}
+                  options={[
+                    { value: '', label: '-- Permission --' },
+                    ...Object.entries(catalogByWorkspace).flatMap(([ws, cats]) =>
+                      Object.entries(cats).flatMap(([cat, perms]) =>
+                        perms.map((p) => ({
+                          value: p.code,
+                          label: `${WORKSPACE_GROUPS[ws].label} / ${p.name ?? p.code}`,
+                        })),
+                      ),
+                    ),
+                  ]}
+                />
+                <Select
+                  label=""
+                  value={overrideType}
+                  onChange={(e) => setOverrideType(e.target.value as 'GRANT' | 'DENY')}
+                  options={[
+                    { value: 'GRANT', label: 'GRANT' },
+                    { value: 'DENY', label: 'DENY' },
+                  ]}
+                />
+                <div className="flex items-end">
+                  <Button variant="secondary" size="sm" onClick={addOverride} disabled={!overridePerm || actionBusy}>
+                    Add Override
+                  </Button>
                 </div>
               </div>
-            )}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {overrides.length === 0 ? (
+                  <p className="text-sm text-muted">No direct overrides.</p>
+                ) : (
+                  overrides.map((o) => (
+                    <div key={o.id} className="flex items-center gap-1">
+                      <Badge variant={o.override_type === 'GRANT' ? 'success' : 'danger'}>
+                        {o.override_type}: {o.permission_code}
+                      </Badge>
+                      <button
+                        onClick={() => revokeOverride(o.permission_code)}
+                        disabled={actionBusy}
+                        className="text-red-400 hover:text-red-600 text-xs font-bold px-1 cursor-pointer"
+                      >
+                        x
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
 
             {/* Actions */}
             <div className="flex gap-2 pt-2 border-t border-border">

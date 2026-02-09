@@ -57,6 +57,7 @@ def _get_cash_drawer_policy(store_id: int) -> str:
 # =============================================================================
 
 @registers_bp.post("/")
+@registers_bp.post("")
 @require_auth
 @require_permission("MANAGE_REGISTER")
 def create_register_route():
@@ -105,6 +106,7 @@ def create_register_route():
 
 
 @registers_bp.get("/")
+@registers_bp.get("")
 @require_auth
 @require_permission("CREATE_SALE")  # Anyone who can create sales can view registers
 def list_registers_route():
@@ -129,8 +131,18 @@ def list_registers_route():
 
     registers = query.order_by(Register.register_number).all()
 
+    result = []
+    for r in registers:
+        d = r.to_dict()
+        current_session = db.session.query(RegisterSession).filter_by(
+            register_id=r.id,
+            status="OPEN"
+        ).first()
+        d["current_session"] = current_session.to_dict() if current_session else None
+        result.append(d)
+
     return jsonify({
-        "registers": [r.to_dict() for r in registers]
+        "registers": result
     }), 200
 
 
@@ -314,6 +326,59 @@ def close_shift_route(session_id: int):
         return jsonify({"error": str(e)}), 400
     except Exception:
         current_app.logger.exception("Failed to close shift")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@registers_bp.post("/<int:register_id>/force-close")
+@require_auth
+@require_permission("MANAGE_REGISTER")
+def force_close_register_route(register_id: int):
+    """
+    Force-close the currently open shift on a register (admin/manager action).
+
+    Request body (optional):
+    {
+        "closing_cash_cents": 0,
+        "notes": "Forced close by admin"
+    }
+    """
+    try:
+        register = db.session.query(Register).get(register_id)
+        if not register:
+            return jsonify({"error": "Register not found"}), 404
+        scope_error = _ensure_store_scope(register.store_id)
+        if scope_error:
+            return scope_error
+
+        open_session = db.session.query(RegisterSession).filter_by(
+            register_id=register_id,
+            status="OPEN",
+        ).first()
+        if not open_session:
+            return jsonify({"error": "No open session on this register"}), 404
+
+        data = request.get_json(silent=True) or {}
+        closing_cash_cents = data.get("closing_cash_cents")
+        notes = data.get("notes")
+
+        if closing_cash_cents is None:
+            closing_cash_cents = open_session.expected_cash_cents or open_session.opening_cash_cents or 0
+        if closing_cash_cents < 0:
+            return jsonify({"error": "closing_cash_cents cannot be negative"}), 400
+
+        session = register_service.close_shift(
+            session_id=open_session.id,
+            closing_cash_cents=closing_cash_cents,
+            notes=notes or "Forced close by manager/admin",
+            current_user_id=g.current_user.id,
+            manager_override=True,
+        )
+
+        return jsonify({"session": session.to_dict()}), 200
+    except ShiftError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        current_app.logger.exception("Failed to force-close register")
         return jsonify({"error": "Internal server error"}), 500
 
 

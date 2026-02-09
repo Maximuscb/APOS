@@ -28,6 +28,8 @@
 #   List all users with roles and active status.
 # - python -m flask users create --org-id 1 --username admin --email admin@apos.local --password "Password123!" --role admin
 #   Create a user (prompts if options are omitted).
+# - python -m flask users create-developer --username dev --email dev@apos.local --password "Password123!"
+#   Create a cross-org developer superuser (no org, is_developer=True).
 #
 # Permission inspection/repair:
 # - python -m flask perms list --category SALES
@@ -56,7 +58,7 @@ from flask.cli import with_appcontext
 
 from .extensions import db
 from .models import Store, User, Role, UserRole, Permission, RolePermission, Organization
-from .services.auth_service import create_user, create_default_roles, assign_role, PasswordValidationError
+from .services.auth_service import create_user, create_default_roles, assign_role, hash_password, PasswordValidationError
 from .services import permission_service
 from .services import maintenance_service
 
@@ -342,6 +344,59 @@ def create_user_cli(org_id, username, email, password, role):
         click.echo("Requirements: 8+ chars, uppercase, lowercase, digit, special char")
     except Exception as e:
         click.echo(f"FAIL Failed to create user: {str(e)}")
+
+
+@users_group.command('create-developer')
+@click.option('--username', prompt=True, help='Username')
+@click.option('--email', prompt=True, help='Email address')
+@click.option('--password', prompt=True, hide_input=True, confirmation_prompt=True, help='Password')
+@with_appcontext
+def create_developer_cli(username, email, password):
+    """
+    Create a developer (cross-org superuser) account.
+
+    Developer users have is_developer=True and no org_id,
+    allowing them to switch between organizations via the UI.
+    They receive the 'developer' role with all permissions
+    including DEVELOPER_ACCESS.
+    """
+    try:
+        existing = db.session.query(User).filter_by(username=username).first()
+        if existing:
+            click.echo(f"FAIL User '{username}' already exists")
+            return
+
+        password_hash = hash_password(password)
+        user = User(
+            org_id=None,
+            username=username,
+            email=email,
+            password_hash=password_hash,
+            store_id=None,
+            is_developer=True,
+        )
+        db.session.add(user)
+        db.session.commit()
+
+        # Try to assign developer role (needs an org-scoped role — create if needed)
+        role = db.session.query(Role).filter_by(name='developer').first()
+        if role:
+            assign_role(user.id, 'developer')
+            click.echo(f"PASS Assigned 'developer' role")
+        else:
+            click.echo("WARN  No 'developer' role found — run 'flask system init-permissions' to create roles")
+
+        click.echo(f"PASS Created developer user: {username} ({email})")
+        click.echo(f"     is_developer = True, org_id = None")
+        click.echo(f"     User ID: {user.id}")
+        click.echo("")
+        click.echo("To use: log in, then use the org switcher in the top banner to pick an organization.")
+
+    except PasswordValidationError as e:
+        click.echo(f"FAIL Password validation failed: {str(e)}")
+        click.echo("Requirements: 8+ chars, uppercase, lowercase, digit, special char")
+    except Exception as e:
+        click.echo(f"FAIL Failed to create developer: {str(e)}")
 
 
 @users_group.command('list')

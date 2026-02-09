@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+from flask import Blueprint, jsonify, request, g
+
+from ..extensions import db
+from ..decorators import require_auth, require_developer
+from ..models import Organization, SessionToken, Store
+from ..services import session_service
+
+developer_bp = Blueprint("developer", __name__, url_prefix="/api/developer")
+
+
+@developer_bp.route("/organizations", methods=["GET"])
+@require_auth
+@require_developer
+def list_organizations():
+    """List all organizations (developer only)."""
+    orgs = db.session.query(Organization).order_by(Organization.name).all()
+    return jsonify([o.to_dict() for o in orgs])
+
+
+@developer_bp.route("/switch-org", methods=["POST"])
+@require_auth
+@require_developer
+def switch_org():
+    """
+    Switch developer session to a different organization.
+
+    Creates a new session token with the target org context.
+    The old session remains valid (caller should discard it).
+    """
+    data = request.get_json() or {}
+    org_id = data.get("org_id")
+
+    if not org_id:
+        return jsonify({"error": "org_id is required"}), 400
+
+    org = db.session.query(Organization).filter_by(id=org_id, is_active=True).first()
+    if not org:
+        return jsonify({"error": "Organization not found or inactive"}), 404
+
+    # Pick the first store in the target org (if any) as default
+    store = db.session.query(Store).filter_by(org_id=org_id).first()
+
+    # Revoke the current session
+    current_session = g.session_context.session
+    current_session.is_revoked = True
+    current_session.revoked_reason = f"Developer switched to org {org_id}"
+    db.session.commit()
+
+    # Create a new session with the target org context
+    user = g.current_user
+    plaintext_token = session_service.generate_token()
+    token_hash = session_service.hash_token(plaintext_token)
+
+    now = session_service.utcnow()
+    new_session = SessionToken(
+        user_id=user.id,
+        org_id=org_id,
+        store_id=store.id if store else None,
+        token_hash=token_hash,
+        created_at=now,
+        last_used_at=now,
+        expires_at=now + session_service.SESSION_ABSOLUTE_TIMEOUT,
+        user_agent=request.headers.get("User-Agent"),
+        ip_address=request.remote_addr,
+        is_revoked=False,
+    )
+    db.session.add(new_session)
+    db.session.commit()
+
+    return jsonify({
+        "token": plaintext_token,
+        "org_id": org_id,
+        "org_name": org.name,
+        "store_id": store.id if store else None,
+        "store_name": store.name if store else None,
+    })
+
+
+@developer_bp.route("/status", methods=["GET"])
+@require_auth
+@require_developer
+def developer_status():
+    """Get current developer session context."""
+    user = g.current_user
+    org = None
+    if g.org_id:
+        org = db.session.query(Organization).filter_by(id=g.org_id).first()
+
+    return jsonify({
+        "is_developer": True,
+        "user_id": user.id,
+        "username": user.username,
+        "org_id": g.org_id,
+        "org_name": org.name if org else None,
+        "store_id": g.store_id,
+    })
