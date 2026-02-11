@@ -25,11 +25,12 @@ const navItems: NavItem[] = [
 ];
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
-  const { hasRole, hasPermission } = useAuth();
+  const { hasRole, hasPermission, isDeveloper } = useAuth();
 
   return (
     <nav className="flex flex-col gap-1 p-3">
       {navItems.map((item) => {
+        if (item.path === '/operations/developer' && !isDeveloper) return null;
         if (item.minRole && !hasRole(item.minRole)) return null;
         if (item.permissions && !item.permissions.some((p) => hasPermission(p))) return null;
         return (
@@ -46,6 +47,18 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
           </NavLink>
         );
       })}
+      {isDeveloper && (
+        <NavLink
+          to="/operations/developer"
+          onClick={onNavigate}
+          className={({ isActive }) =>
+            `flex items-center gap-2 px-3 h-10 rounded-xl text-sm font-medium transition-colors
+              ${isActive ? 'bg-primary-light text-primary' : 'text-slate-600 hover:bg-slate-100'}`
+          }
+        >
+          Developer
+        </NavLink>
+      )}
     </nav>
   );
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from flask import Blueprint, jsonify, request, g
+from sqlalchemy.exc import IntegrityError
 
 from ..extensions import db
 from ..decorators import require_auth, require_developer
@@ -17,6 +18,40 @@ def list_organizations():
     """List all organizations (developer only)."""
     orgs = db.session.query(Organization).order_by(Organization.name).all()
     return jsonify([o.to_dict() for o in orgs])
+
+
+@developer_bp.route("/organizations", methods=["POST"])
+@require_auth
+@require_developer
+def create_organization():
+    """Create an organization and optional initial store (developer only)."""
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
+    code = (data.get("code") or "").strip() or None
+    initial_store_name = (data.get("initial_store_name") or "").strip()
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    org = Organization(name=name, code=code, is_active=True)
+    db.session.add(org)
+    try:
+        db.session.flush()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": "Organization code already exists"}), 400
+
+    created_store = None
+    if initial_store_name:
+        created_store = Store(org_id=org.id, name=initial_store_name)
+        db.session.add(created_store)
+
+    db.session.commit()
+
+    return jsonify({
+        "organization": org.to_dict(),
+        "store": created_store.to_dict() if created_store else None,
+    }), 201
 
 
 @developer_bp.route("/switch-org", methods=["POST"])

@@ -22,6 +22,7 @@ const VendorsPage = lazy(() => import('@/routes/operations/VendorsPage'));
 const CommunicationsPage = lazy(() => import('@/routes/operations/CommunicationsPage').then((m) => ({ default: m.CommunicationsPage })));
 const OrganizationPage = lazy(() => import('@/routes/operations/OrganizationPage').then((m) => ({ default: m.OrganizationPage })));
 const PromotionsPage = lazy(() => import('@/routes/operations/PromotionsPage').then((m) => ({ default: m.PromotionsPage })));
+const DeveloperPage = lazy(() => import('@/routes/operations/DeveloperPage'));
 
 function AuthGuard({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
@@ -77,6 +78,7 @@ export default function App() {
                 <Route path="communications" element={<Suspense fallback={<Loading />}><CommunicationsPage /></Suspense>} />
                 <Route path="organization" element={<Suspense fallback={<Loading />}><OrganizationPage /></Suspense>} />
                 <Route path="promotions" element={<Suspense fallback={<Loading />}><PromotionsPage /></Suspense>} />
+                <Route path="developer" element={<Suspense fallback={<Loading />}><DeveloperPage /></Suspense>} />
                 <Route path="settings" element={<Suspense fallback={<Loading />}><SettingsPage /></Suspense>} />
                 <Route path="registers" element={<Navigate to="/operations/devices" replace />} />
                 <Route path="overrides" element={<Navigate to="/operations/users" replace />} />

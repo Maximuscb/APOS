@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Tabs } from '@/components/ui/Tabs';
+import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
 
 interface StoreItem {
@@ -32,11 +33,14 @@ interface UserItem {
 }
 
 export function OrganizationPage() {
+  const { hasPermission, isDeveloper } = useAuth();
   const [activeTab, setActiveTab] = useState('stores');
   const [stores, setStores] = useState<StoreItem[]>([]);
   const [registers, setRegisters] = useState<RegisterItem[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // Create store dialog
   const [showCreateStore, setShowCreateStore] = useState(false);
@@ -45,6 +49,7 @@ export function OrganizationPage() {
 
   const fetchAll = useCallback(() => {
     setLoading(true);
+    setError(null);
     Promise.all([
       api.get<StoreItem[]>('/api/stores'),
       api.get<{ users: UserItem[] }>('/api/admin/users'),
@@ -58,7 +63,9 @@ export function OrganizationPage() {
             .then((allRegs) => setRegisters(allRegs.flat()));
         }
       })
-      .catch(() => {})
+      .catch((e: any) => {
+        setError(e?.detail || e?.message || 'Failed to load organization data.');
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -66,12 +73,19 @@ export function OrganizationPage() {
 
   const handleCreateStore = async () => {
     if (!storeName.trim()) return;
-    await api.post('/api/stores', { name: storeName, code: storeCode || undefined });
-    setShowCreateStore(false);
-    setStoreName('');
-    setStoreCode('');
-    fetchAll();
+    setCreateError(null);
+    try {
+      await api.post('/api/stores', { name: storeName, code: storeCode || undefined });
+      setShowCreateStore(false);
+      setStoreName('');
+      setStoreCode('');
+      fetchAll();
+    } catch (e: any) {
+      setCreateError(e?.detail || e?.message || 'Failed to create store.');
+    }
   };
+
+  const canCreateStore = isDeveloper || hasPermission('MANAGE_STORES');
 
   const tabs = [
     { value: 'stores', label: `Stores (${stores.length})` },
@@ -83,12 +97,13 @@ export function OrganizationPage() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-900">Organization</h1>
-        {activeTab === 'stores' && (
+        {activeTab === 'stores' && canCreateStore && (
           <Button onClick={() => setShowCreateStore(true)}>+ New Store</Button>
         )}
       </div>
 
       <Tabs tabs={tabs} value={activeTab} onValueChange={setActiveTab} />
+      {error && <div className="p-3 rounded-xl bg-red-50 text-red-700 text-sm">{error}</div>}
 
       {loading ? (
         <p className="text-muted">Loading...</p>
@@ -151,10 +166,11 @@ export function OrganizationPage() {
 
       <Dialog open={showCreateStore} onClose={() => setShowCreateStore(false)} title="New Store">
         <div className="space-y-4 p-1">
+          {createError && <div className="p-3 rounded-xl bg-red-50 text-red-700 text-sm">{createError}</div>}
           <Input label="Store Name" value={storeName} onChange={(e) => setStoreName(e.target.value)} />
           <Input label="Store Code (optional)" value={storeCode} onChange={(e) => setStoreCode(e.target.value)} />
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setShowCreateStore(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setShowCreateStore(false)}>Cancel</Button>
             <Button onClick={handleCreateStore}>Create</Button>
           </div>
         </div>

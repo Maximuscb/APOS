@@ -12,17 +12,30 @@ class StoreError(Exception):
     pass
 
 
-def create_store(name: str, code: str | None = None, parent_store_id: int | None = None) -> Store:
+def _get_store_in_org(org_id: int, store_id: int) -> Store | None:
+    return db.session.query(Store).filter_by(id=store_id, org_id=org_id).first()
+
+
+def create_store(
+    org_id: int,
+    name: str,
+    code: str | None = None,
+    parent_store_id: int | None = None,
+) -> Store:
     def _op():
         if not name:
             raise StoreError("Store name is required")
 
+        if not org_id:
+            raise StoreError("Organization context is required")
+
         if parent_store_id is not None:
-            parent = db.session.query(Store).filter_by(id=parent_store_id).first()
+            parent = _get_store_in_org(org_id, parent_store_id)
             if not parent:
                 raise StoreError("Parent store not found")
 
         store = Store(
+            org_id=org_id,
             name=name,
             code=code,
             parent_store_id=parent_store_id,
@@ -36,6 +49,7 @@ def create_store(name: str, code: str | None = None, parent_store_id: int | None
 
 
 def update_store(
+    org_id: int,
     store_id: int,
     *,
     name: str | None = None,
@@ -43,14 +57,14 @@ def update_store(
     parent_store_id: int | None = None
 ) -> Store:
     def _op():
-        store = lock_for_update(db.session.query(Store).filter_by(id=store_id)).first()
+        store = lock_for_update(db.session.query(Store).filter_by(id=store_id, org_id=org_id)).first()
         if not store:
             raise StoreError("Store not found")
 
         if parent_store_id is not None:
             if parent_store_id == store_id:
                 raise StoreError("Store cannot be its own parent")
-            parent = db.session.query(Store).filter_by(id=parent_store_id).first()
+            parent = _get_store_in_org(org_id, parent_store_id)
             if not parent:
                 raise StoreError("Parent store not found")
 
@@ -67,20 +81,20 @@ def update_store(
     return run_with_retry(_op)
 
 
-def get_store(store_id: int) -> Store | None:
-    return db.session.query(Store).filter_by(id=store_id).first()
+def get_store(org_id: int, store_id: int) -> Store | None:
+    return _get_store_in_org(org_id, store_id)
 
 
-def list_stores() -> list[Store]:
-    return db.session.query(Store).order_by(Store.name.asc()).all()
+def list_stores(org_id: int) -> list[Store]:
+    return db.session.query(Store).filter_by(org_id=org_id).order_by(Store.name.asc()).all()
 
 
-def set_store_config(store_id: int, key: str, value: str | None) -> StoreConfig:
+def set_store_config(org_id: int, store_id: int, key: str, value: str | None) -> StoreConfig:
     def _op():
         if not key:
             raise StoreError("Config key is required")
 
-        store = db.session.query(Store).filter_by(id=store_id).first()
+        store = _get_store_in_org(org_id, store_id)
         if not store:
             raise StoreError("Store not found")
 
@@ -99,7 +113,9 @@ def set_store_config(store_id: int, key: str, value: str | None) -> StoreConfig:
     return run_with_retry(_op)
 
 
-def get_store_configs(store_id: int) -> list[StoreConfig]:
+def get_store_configs(org_id: int, store_id: int) -> list[StoreConfig]:
+    if not _get_store_in_org(org_id, store_id):
+        return []
     return db.session.query(StoreConfig).filter_by(store_id=store_id).order_by(StoreConfig.key.asc()).all()
 
 
@@ -130,8 +146,8 @@ def get_descendant_store_ids(store_id: int, *, include_self: bool = True) -> lis
     return result
 
 
-def get_store_tree(store_id: int) -> dict:
-    store = db.session.query(Store).filter_by(id=store_id).first()
+def get_store_tree(org_id: int, store_id: int) -> dict:
+    store = _get_store_in_org(org_id, store_id)
     if not store:
         raise StoreError("Store not found")
 

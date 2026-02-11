@@ -7,6 +7,14 @@ from .services import session_service, permission_service
 from .services.permission_service import PermissionDeniedError
 
 
+def _is_authenticated() -> bool:
+    return hasattr(g, 'current_user') and hasattr(g, 'org_id')
+
+
+def _is_developer() -> bool:
+    return _is_authenticated() and bool(g.current_user.is_developer)
+
+
 def require_auth(f):
     """
     Require authentication and establish tenant context.
@@ -78,12 +86,14 @@ def require_permission(permission_code: str):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             # Ensure @require_auth was called first
-            if not hasattr(g, 'current_user') or not hasattr(g, 'org_id'):
+            if not _is_authenticated():
                 return jsonify({"error": "Authentication required"}), 401
 
-            user = g.current_user
+            if _is_developer():
+                return f(*args, **kwargs)
 
             # Get client context for logging
+            user = g.current_user
             ip_address = request.remote_addr
             user_agent = request.headers.get("User-Agent")
             resource = request.path
@@ -121,8 +131,11 @@ def require_any_permission(*permission_codes):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            if not hasattr(g, 'current_user') or not hasattr(g, 'org_id'):
+            if not _is_authenticated():
                 return jsonify({"error": "Authentication required"}), 401
+
+            if _is_developer():
+                return f(*args, **kwargs)
 
             user = g.current_user
             ip_address = request.remote_addr
@@ -179,8 +192,11 @@ def require_all_permissions(*permission_codes):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            if not hasattr(g, 'current_user') or not hasattr(g, 'org_id'):
+            if not _is_authenticated():
                 return jsonify({"error": "Authentication required"}), 401
+
+            if _is_developer():
+                return f(*args, **kwargs)
 
             user = g.current_user
             ip_address = request.remote_addr

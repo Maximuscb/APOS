@@ -14,7 +14,7 @@ stores_bp = Blueprint("stores", __name__, url_prefix="/api/stores")
 @require_auth
 @require_permission("VIEW_STORES")
 def list_stores():
-    stores = store_service.list_stores()
+    stores = store_service.list_stores(g.org_id)
     return jsonify([store.to_dict() for store in stores]), 200
 
 
@@ -25,6 +25,7 @@ def create_store():
     data = request.get_json()
     try:
         store = store_service.create_store(
+            org_id=g.org_id,
             name=data.get("name"),
             code=data.get("code"),
             parent_store_id=data.get("parent_store_id"),
@@ -38,7 +39,7 @@ def create_store():
 @require_auth
 @require_permission("VIEW_STORES")
 def get_store(store_id: int):
-    store = store_service.get_store(store_id)
+    store = store_service.get_store(g.org_id, store_id)
     if not store:
         return jsonify({"error": "Store not found"}), 404
     return jsonify(store.to_dict()), 200
@@ -51,6 +52,7 @@ def update_store(store_id: int):
     data = request.get_json()
     try:
         store = store_service.update_store(
+            g.org_id,
             store_id,
             name=data.get("name"),
             code=data.get("code"),
@@ -65,7 +67,7 @@ def update_store(store_id: int):
 @require_auth
 @require_permission("VIEW_STORES")
 def list_store_configs(store_id: int):
-    configs = store_service.get_store_configs(store_id)
+    configs = store_service.get_store_configs(g.org_id, store_id)
     return jsonify([config.to_dict() for config in configs]), 200
 
 
@@ -82,7 +84,7 @@ def set_store_config(store_id: int):
         if value is not None and value.upper() not in ["MANAGER_ONLY", "DUAL_AUTH"]:
             return jsonify({"error": "Invalid cash_drawer_approval_mode value"}), 400
     try:
-        config = store_service.set_store_config(store_id, key, value)
+        config = store_service.set_store_config(g.org_id, store_id, key, value)
         return jsonify(config.to_dict()), 200
     except store_service.StoreError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -93,7 +95,7 @@ def set_store_config(store_id: int):
 @require_permission("VIEW_STORES")
 def get_store_tree(store_id: int):
     try:
-        tree = store_service.get_store_tree(store_id)
+        tree = store_service.get_store_tree(g.org_id, store_id)
         return jsonify(tree), 200
     except store_service.StoreError as exc:
         return jsonify({"error": str(exc)}), 400
