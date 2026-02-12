@@ -5,7 +5,6 @@ from typing import Any
 
 from ..extensions import db
 from ..models import (
-    InventoryTransaction,
     Product,
     ProductIdentifier,
     Sale,
@@ -15,7 +14,12 @@ from ..models import (
 )
 from app.time_utils import parse_iso_datetime, utcnow
 from .document_service import next_document_number
-from .inventory_service import get_quantity_on_hand
+from .inventory_service import (
+    get_quantity_on_hand,
+    _sell_inventory_inner,
+    _receive_inventory_inner,
+    _adjust_inventory_inner,
+)
 
 
 def _to_int(value: Any) -> int | None:
@@ -254,26 +258,44 @@ class InventorySchema(BaseImportSchema):
 
     def post_row(self, normalized_row: dict[str, Any], context: SchemaContext) -> dict[str, Any]:
         occurred_at = parse_iso_datetime(normalized_row.get("occurred_at")) or utcnow()
-        tx = InventoryTransaction(
-            store_id=normalized_row["store_id"],
-            product_id=normalized_row["resolved_product_id"],
-            type="IMPORT_ADJUSTMENT",
-            quantity_delta=normalized_row["quantity_delta"],
-            unit_cost_cents=normalized_row.get("unit_cost_cents"),
-            note=normalized_row.get("note"),
-            occurred_at=occurred_at,
-            status="POSTED",
-            posted_by_user_id=context.actor_user_id,
-            posted_at=utcnow(),
-        )
-        db.session.add(tx)
-        db.session.flush()
+        store_id = normalized_row["store_id"]
+        product_id = normalized_row["resolved_product_id"]
+        quantity_delta = normalized_row["quantity_delta"]
+        unit_cost_cents = normalized_row.get("unit_cost_cents")
+        note = normalized_row.get("note")
+
+        if quantity_delta > 0 and unit_cost_cents is not None:
+            # Positive delta with cost -> canonical RECEIVE (contributes to WAC)
+            tx = _receive_inventory_inner(
+                store_id=store_id,
+                product_id=product_id,
+                quantity=quantity_delta,
+                unit_cost_cents=unit_cost_cents,
+                occurred_dt=occurred_at,
+                note=note or f"Imported receive (batch {context.batch_id})",
+                status="POSTED",
+                posted_by_user_id=context.actor_user_id,
+            )
+            event_type = "INVENTORY_RECEIVED"
+        else:
+            # Negative delta or no cost -> canonical ADJUST (no WAC impact)
+            tx = _adjust_inventory_inner(
+                store_id=store_id,
+                product_id=product_id,
+                quantity_delta=quantity_delta,
+                occurred_dt=occurred_at,
+                note=note or f"Imported adjustment (batch {context.batch_id})",
+                status="POSTED",
+                posted_by_user_id=context.actor_user_id,
+            )
+            event_type = "INVENTORY_ADJUSTMENT"
+
         return {
             "entity_type": "inventory_transaction",
             "entity_id": tx.id,
-            "event_type": "INVENTORY_ADJUSTMENT",
+            "event_type": event_type,
             "event_category": "inventory",
-            "store_id": normalized_row["store_id"],
+            "store_id": store_id,
             "occurred_at": occurred_at,
         }
 
@@ -387,12 +409,13 @@ class SalesSchema(BaseImportSchema):
         store_id = normalized_row["store_id"]
         lines = normalized_row["lines"]
 
+        # Oversell check as-of occurred_at (historical accuracy)
         requested_by_product: dict[int, int] = {}
         for line in lines:
             product_id = line["resolved_product_id"]
             requested_by_product[product_id] = requested_by_product.get(product_id, 0) + int(line["quantity"])
         for product_id, needed in requested_by_product.items():
-            on_hand = get_quantity_on_hand(store_id, product_id)
+            on_hand = get_quantity_on_hand(store_id, product_id, as_of=occurred_at)
             if on_hand < needed:
                 raise ValueError(
                     f"inventory would go negative for product {product_id}: on_hand={on_hand}, requested={needed}"
@@ -441,21 +464,20 @@ class SalesSchema(BaseImportSchema):
             db.session.add(sale_line)
             db.session.flush()
 
-            inv_tx = InventoryTransaction(
+            # Use canonical sell_inventory path — computes WAC, snapshots
+            # unit_cost_cents_at_sale and cogs_cents identically to POS sales
+            inv_tx = _sell_inventory_inner(
                 store_id=store_id,
                 product_id=line["resolved_product_id"],
-                type="SALE",
-                quantity_delta=-quantity,
-                note=f"Imported sale {document_number}",
-                occurred_at=occurred_at,
+                quantity=quantity,
                 sale_id=document_number,
                 sale_line_id=str(idx),
+                occurred_dt=occurred_at,
+                note=f"Imported sale {document_number}",
                 status="POSTED",
                 posted_by_user_id=created_by_user_id,
-                posted_at=utcnow(),
+                skip_negative_check=True,  # already checked above per-product
             )
-            db.session.add(inv_tx)
-            db.session.flush()
             sale_line.inventory_transaction_id = inv_tx.id
 
         sale.total_due_cents = total_due

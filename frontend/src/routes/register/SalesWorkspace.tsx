@@ -48,12 +48,18 @@ export function SalesWorkspace({
   products,
   registerId,
   sessionId,
+  clockStatus,
+  clockBusy = false,
+  onClockOut,
 }: {
   userId: number;
   storeId: number;
   products: Product[];
   registerId: number | null;
   sessionId: number;
+  clockStatus?: string | null;
+  clockBusy?: boolean;
+  onClockOut?: () => Promise<void>;
 }) {
   const [currentSale, setCurrentSale] = useState<Sale | null>(null);
   const [lines, setLines] = useState<SaleLine[]>([]);
@@ -76,6 +82,7 @@ export function SalesWorkspace({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [mode, setMode] = useState<'quick' | 'returns'>('quick');
+  const [clockOutError, setClockOutError] = useState<string | null>(null);
 
   const productById = useMemo(() => {
     const map = new Map<number, Product>();
@@ -289,6 +296,19 @@ export function SalesWorkspace({
   const isReadyForPayment = currentSale?.status === 'POSTED';
   const remainingCents = paymentSummary?.remaining_cents ?? totalCents;
   const isPaid = paymentSummary?.remaining_cents !== null && paymentSummary?.remaining_cents !== undefined && paymentSummary.remaining_cents <= 0;
+  const normalizedClockStatus = (clockStatus ?? '').toUpperCase();
+  const isClockedIn = normalizedClockStatus === 'CLOCKED_IN' || normalizedClockStatus === 'ON_BREAK';
+  const isOnBreak = normalizedClockStatus === 'ON_BREAK';
+
+  async function handleClockOut() {
+    if (!onClockOut) return;
+    setClockOutError(null);
+    try {
+      await onClockOut();
+    } catch (e: any) {
+      setClockOutError(getErrorMessage(e, 'Unable to clock out.'));
+    }
+  }
 
   return (
     <div className="h-full grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -381,6 +401,25 @@ export function SalesWorkspace({
             </div>
           </Card>
           <div className="xl:col-span-4 min-h-0 flex flex-col gap-4">
+            <Card>
+              <div className="flex items-center justify-between">
+                <CardTitle>Time Clock</CardTitle>
+                <Badge variant={isClockedIn ? (isOnBreak ? 'warning' : 'success') : 'muted'}>
+                  {isOnBreak ? 'On Break' : isClockedIn ? 'Clocked In' : 'Clocked Out'}
+                </Badge>
+              </div>
+              {clockOutError && <div className="mt-3 p-3 bg-red-50 text-red-700 text-sm rounded-xl">{clockOutError}</div>}
+              <div className="mt-3">
+                <Button
+                  variant="warning"
+                  onClick={handleClockOut}
+                  disabled={!isClockedIn || clockBusy || !onClockOut}
+                  className="w-full"
+                >
+                  {clockBusy ? 'Working...' : 'Clock Out'}
+                </Button>
+              </div>
+            </Card>
             <Card className="min-h-0 flex-[3] flex flex-col">
               <div className="flex items-center justify-between">
                 <div><CardTitle>Order Summary</CardTitle><CardDescription>{currentSale ? currentSale.document_number : 'Preparing sale...'}</CardDescription></div>

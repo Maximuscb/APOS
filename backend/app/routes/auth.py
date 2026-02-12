@@ -119,11 +119,15 @@ def login_route():
             user_agent=user_agent,
             ip_address=ip_address
         )
+        permissions = list(permission_service.get_user_permissions(user.id))
 
         return jsonify({
             "user": user.to_dict(),
+            "permissions": permissions,
             "token": token,
             "session": session.to_dict(),
+            "org_id": session.org_id,
+            "store_id": session.store_id,
             "message": "Login successful"
         }), 200
 
@@ -325,11 +329,15 @@ def login_pin_route():
             user_agent=user_agent,
             ip_address=ip_address
         )
+        permissions = list(permission_service.get_user_permissions(user.id))
 
         return jsonify({
             "user": user.to_dict(),
+            "permissions": permissions,
             "token": token,
             "session": session.to_dict(),
+            "org_id": session.org_id,
+            "store_id": session.store_id,
             "message": "PIN login successful"
         }), 200
 

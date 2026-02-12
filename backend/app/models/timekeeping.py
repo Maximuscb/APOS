@@ -157,7 +157,7 @@ class TimeClockCorrection(db.Model):
     submitted_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
 
     # Approval status: PENDING, APPROVED, REJECTED
-    status = db.Column(db.String(16), nullable=False, default="PENDING", index=True)
+    status = db.Column(db.String(16), nullable=False, default="PENDING")
 
     # Manager approval
     approved_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)

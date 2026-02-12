@@ -228,6 +228,76 @@ def create_correction(
     return correction
 
 
+def edit_entry(
+    *,
+    entry_id: int,
+    edited_by_user_id: int,
+    clock_in_at: datetime | None = None,
+    clock_out_at: datetime | None = None,
+    notes: str | None = ...,  # sentinel: ... means "not provided"
+    reason: str,
+) -> tuple[TimeClockEntry, TimeClockCorrection]:
+    """Directly edit a time entry (manager override). Creates an audit log record."""
+    if not reason or not reason.strip():
+        raise TimekeepingError("reason is required for edits")
+
+    entry = db.session.query(TimeClockEntry).filter_by(id=entry_id).first()
+    if not entry:
+        raise TimekeepingError("Time clock entry not found")
+
+    # Snapshot originals
+    original_clock_in = entry.clock_in_at
+    original_clock_out = entry.clock_out_at
+
+    # Apply changes
+    new_clock_in = clock_in_at if clock_in_at is not None else entry.clock_in_at
+    new_clock_out = clock_out_at if clock_out_at is not None else entry.clock_out_at
+
+    if new_clock_out and new_clock_in and new_clock_out <= new_clock_in:
+        raise TimekeepingError("clock_out_at must be after clock_in_at")
+
+    entry.clock_in_at = new_clock_in
+    entry.clock_out_at = new_clock_out
+    if notes is not ...:
+        entry.notes = notes
+
+    # Recalculate worked minutes if clock times changed and entry is closed
+    if entry.clock_out_at and entry.status == "CLOSED":
+        total_minutes = int((entry.clock_out_at - entry.clock_in_at).total_seconds() // 60)
+        total_break = entry.total_break_minutes or 0
+        entry.total_worked_minutes = max(total_minutes - total_break, 0)
+
+    # Create audit record
+    correction = TimeClockCorrection(
+        time_clock_entry_id=entry.id,
+        original_clock_in_at=original_clock_in,
+        original_clock_out_at=original_clock_out,
+        corrected_clock_in_at=entry.clock_in_at,
+        corrected_clock_out_at=entry.clock_out_at,
+        reason=reason.strip(),
+        submitted_by_user_id=edited_by_user_id,
+        status="APPLIED",
+        approved_by_user_id=edited_by_user_id,
+        approved_at=utcnow(),
+    )
+    db.session.add(correction)
+    db.session.flush()
+
+    append_ledger_event(
+        store_id=entry.store_id,
+        event_type="timeclock.entry_edited",
+        event_category="timekeeping",
+        entity_type="time_clock_entry",
+        entity_id=entry.id,
+        actor_user_id=edited_by_user_id,
+        occurred_at=utcnow(),
+        note=reason.strip(),
+    )
+
+    db.session.commit()
+    return entry, correction
+
+
 def approve_correction(
     *,
     correction_id: int,

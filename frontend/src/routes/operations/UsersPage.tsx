@@ -9,6 +9,13 @@ import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input, Select } from '@/components/ui/Input';
 import { Tabs } from '@/components/ui/Tabs';
+import { RoleManagement } from './RoleManagement';
+import {
+  type Permission,
+  WORKSPACE_GROUPS,
+  CATEGORY_LABELS,
+  groupPermissions,
+} from '@/lib/permission-groups';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -30,7 +37,6 @@ type Role = {
   name: string;
   description: string | null;
 };
-type Permission = { code: string; name?: string; category?: string };
 type Override = {
   id: number;
   user_id: number;
@@ -48,72 +54,6 @@ type ManagerStoreAccess = {
 };
 
 /* ------------------------------------------------------------------ */
-/*  Permission workspace grouping                                      */
-/* ------------------------------------------------------------------ */
-
-const WORKSPACE_GROUPS: Record<string, { label: string; categories: string[] }> = {
-  sales: {
-    label: 'Sales',
-    categories: ['SALES', 'REGISTERS'],
-  },
-  inventory: {
-    label: 'Inventory',
-    categories: ['INVENTORY'],
-  },
-  documents: {
-    label: 'Documents',
-    categories: ['DOCUMENTS'],
-  },
-  communications: {
-    label: 'Communications',
-    categories: ['COMMUNICATIONS', 'PROMOTIONS'],
-  },
-  timekeeping: {
-    label: 'Timekeeping',
-    categories: ['TIMEKEEPING'],
-  },
-  management: {
-    label: 'Management',
-    categories: ['USERS', 'ORGANIZATION', 'DEVICES', 'SYSTEM'],
-  },
-};
-
-const CATEGORY_LABELS: Record<string, string> = {
-  SALES: 'Sales',
-  REGISTERS: 'Registers',
-  INVENTORY: 'Inventory',
-  DOCUMENTS: 'Documents',
-  COMMUNICATIONS: 'Communications',
-  PROMOTIONS: 'Promotions',
-  TIMEKEEPING: 'Timekeeping',
-  USERS: 'Users',
-  ORGANIZATION: 'Organization',
-  DEVICES: 'Devices',
-  SYSTEM: 'System',
-};
-
-function groupPermissions(permissions: Permission[]) {
-  const grouped: Record<string, Record<string, Permission[]>> = {};
-  for (const ws of Object.keys(WORKSPACE_GROUPS)) {
-    grouped[ws] = {};
-    for (const cat of WORKSPACE_GROUPS[ws].categories) {
-      grouped[ws][cat] = [];
-    }
-  }
-  for (const p of permissions) {
-    const cat = p.category ?? 'SYSTEM';
-    for (const [ws, config] of Object.entries(WORKSPACE_GROUPS)) {
-      if (config.categories.includes(cat)) {
-        if (!grouped[ws][cat]) grouped[ws][cat] = [];
-        grouped[ws][cat].push(p);
-        break;
-      }
-    }
-  }
-  return grouped;
-}
-
-/* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -121,6 +61,8 @@ export default function UsersPage() {
   const { currentStoreId: storeId, stores } = useStore();
   const { hasPermission } = useAuth();
   const canScopeAcrossStores = hasPermission('MANAGE_STORES') && stores.length > 1;
+  const canManagePermissions = hasPermission('MANAGE_PERMISSIONS');
+  const [mainTab, setMainTab] = useState('users');
 
   // Users list
   const [users, setUsers] = useState<User[]>([]);
@@ -406,14 +348,32 @@ export default function UsersPage() {
     (s) => !effectiveManagerStoreIds.includes(s.id),
   );
 
+  const mainTabs = [
+    { value: 'users', label: 'Users' },
+    ...(canManagePermissions
+      ? [{ value: 'roles', label: 'Roles' }]
+      : []),
+  ];
+
   return (
     <div className="flex flex-col gap-6 max-w-6xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Users</h1>
-        <p className="text-sm text-muted mt-1">
-          Manage accounts, roles, and direct permission overrides in one place.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Users</h1>
+          <p className="text-sm text-muted mt-1">
+            Manage accounts, roles, and direct permission overrides.
+          </p>
+        </div>
       </div>
+
+      {mainTabs.length > 1 && (
+        <Tabs tabs={mainTabs} active={mainTab} onChange={setMainTab} />
+      )}
+
+      {mainTab === 'roles' && canManagePermissions ? (
+        <RoleManagement />
+      ) : (
+      <>
 
       {error && (
         <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
@@ -866,6 +826,8 @@ export default function UsersPage() {
           </div>
         ) : null}
       </Dialog>
+      </>
+      )}
     </div>
   );
 }

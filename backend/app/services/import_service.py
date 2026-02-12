@@ -369,7 +369,7 @@ def post_mapped_rows(
         .limit(limit)
         .all()
     )
-    if batch.import_type == "Sales":
+    if batch.import_type in ("Sales", "Inventory"):
         ready_rows.sort(key=lambda r: (str((r.normalized_data or {}).get("occurred_at") or ""), r.row_number))
 
     posted = 0

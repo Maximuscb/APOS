@@ -10,7 +10,7 @@ from .imports import ImportBatch, ImportStagingRow, ImportEntityMapping
 from .communications import Announcement, Reminder, Task, CommunicationDismissal
 from .promotions import Promotion
 from .customers import Customer, CustomerRewardAccount, CustomerRewardTransaction
-from .settings import OrganizationSetting, DeviceSetting
+from .settings import OrganizationSetting, DeviceSetting, SettingRegistry, SettingValue, SettingAudit
 
 __all__ = [
     'Organization', 'OrganizationMasterLedger', 'Store', 'StoreConfig',
@@ -27,5 +27,5 @@ __all__ = [
     'Announcement', 'Reminder', 'Task', 'CommunicationDismissal',
     'Promotion',
     'Customer', 'CustomerRewardAccount', 'CustomerRewardTransaction',
-    'OrganizationSetting', 'DeviceSetting',
+    'OrganizationSetting', 'DeviceSetting', 'SettingRegistry', 'SettingValue', 'SettingAudit',
 ]

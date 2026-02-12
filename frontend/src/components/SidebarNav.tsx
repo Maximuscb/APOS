@@ -18,7 +18,7 @@ const navItems: NavItem[] = [
   { path: '/operations/timekeeping', label: 'Timekeeping', permissions: ['VIEW_TIMEKEEPING', 'MANAGE_TIMEKEEPING'] },
   { path: '/operations/vendors', label: 'Vendors', permissions: ['VIEW_VENDORS', 'MANAGE_VENDORS'] },
   { path: '/operations/users', label: 'Users', permissions: ['VIEW_USERS', 'CREATE_USER', 'EDIT_USER', 'ASSIGN_ROLES', 'DEACTIVATE_USER'] },
-  { path: '/operations/organization', label: 'Organization', permissions: ['MANAGE_ORGANIZATION'] },
+
   { path: '/operations/settings', label: 'Settings', permissions: ['VIEW_STORES', 'MANAGE_STORES'] },
 ];
 

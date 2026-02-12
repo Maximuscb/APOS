@@ -24,7 +24,7 @@ class Customer(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False)
     store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=True, index=True)
 
     first_name = db.Column(db.String(128), nullable=False)

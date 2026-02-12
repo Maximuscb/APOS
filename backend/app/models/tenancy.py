@@ -106,7 +106,7 @@ class Store(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False)
     name = db.Column(db.String(120), nullable=False)
     code = db.Column(db.String(32), nullable=True, index=True)
     parent_store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=True, index=True)

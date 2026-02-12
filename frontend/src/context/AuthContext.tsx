@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const pinLogin = useCallback(async (pin: string, storeId?: number) => {
-    const data = await api.post<{ token: string; user: AuthUser; permissions?: string[] }>('/api/auth/pin', { pin, store_id: storeId });
+    const data = await api.post<{ token: string; user: AuthUser; permissions?: string[] }>('/api/auth/login-pin', { pin, store_id: storeId });
     api.setToken(data.token);
     setUser(data.user);
     setPermissions(data.permissions ?? []);

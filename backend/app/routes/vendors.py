@@ -29,7 +29,7 @@ def list_vendors_route():
 
     Query parameters:
     - include_inactive: Include inactive vendors (default: false)
-    - search: Search term for name or code
+    - search: Search term for name, code, or reorder mechanism
     - limit: Maximum results (default: 100)
     - offset: Pagination offset (default: 0)
 
@@ -78,6 +78,7 @@ def create_vendor_route():
     {
         "name": "Vendor Name",  // required
         "code": "VCODE",        // optional, unique within org
+        "reorder_mechanism": "Send an email", // required
         "contact_name": "...",  // optional
         "contact_email": "...", // optional
         "contact_phone": "...", // optional
@@ -96,6 +97,9 @@ def create_vendor_route():
     name = data.get("name")
     if not name:
         return jsonify({"error": "name is required"}), 400
+    reorder_mechanism = data.get("reorder_mechanism")
+    if not reorder_mechanism:
+        return jsonify({"error": "reorder_mechanism is required"}), 400
 
     try:
         vendor = vendor_service.create_vendor(
@@ -105,6 +109,7 @@ def create_vendor_route():
             contact_name=data.get("contact_name"),
             contact_email=data.get("contact_email"),
             contact_phone=data.get("contact_phone"),
+            reorder_mechanism=reorder_mechanism,
             address=data.get("address"),
             notes=data.get("notes"),
             created_by_user_id=user_id,
@@ -147,6 +152,7 @@ def update_vendor_route(vendor_id: int):
     {
         "name": "...",
         "code": "...",
+        "reorder_mechanism": "...",
         "contact_name": "...",
         "contact_email": "...",
         "contact_phone": "...",
@@ -178,6 +184,7 @@ def update_vendor_route(vendor_id: int):
             contact_name=data.get("contact_name"),
             contact_email=data.get("contact_email"),
             contact_phone=data.get("contact_phone"),
+            reorder_mechanism=data.get("reorder_mechanism"),
             address=data.get("address"),
             notes=data.get("notes"),
             updated_by_user_id=user_id,

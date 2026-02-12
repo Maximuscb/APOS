@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/Input';
 type Vendor = {
   id: number;
   name: string;
-  code: string | null;
+  reorder_mechanism: string | null;
   contact_email: string | null;
   contact_phone: string | null;
   is_active: boolean;
@@ -21,14 +21,20 @@ export default function VendorsPage() {
 
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
+  const [reorderMechanism, setReorderMechanism] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState('');
+  const [deactivatingVendorId, setDeactivatingVendorId] = useState<number | null>(null);
 
-  async function loadVendors() {
+  async function loadVendors(searchTerm = '') {
     setLoading(true);
     try {
-      const res = await api.get<{ items: Vendor[] }>('/api/vendors');
+      const params = new URLSearchParams();
+      params.set('include_inactive', 'true');
+      if (searchTerm.trim()) params.set('search', searchTerm.trim());
+      const res = await api.get<{ items: Vendor[] }>(`/api/vendors?${params.toString()}`);
       setVendors(res.items ?? []);
     } catch (e: any) {
       setError(e?.detail || e?.message || 'Failed to load vendors.');
@@ -39,12 +45,19 @@ export default function VendorsPage() {
   }
 
   useEffect(() => {
-    loadVendors();
-  }, []);
+    const handle = window.setTimeout(() => {
+      loadVendors(search);
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [search]);
 
   async function createVendor() {
     if (!name.trim()) {
       setError('Vendor name is required.');
+      return;
+    }
+    if (!reorderMechanism.trim()) {
+      setError('Reorder mechanism is required.');
       return;
     }
     setBusy(true);
@@ -54,19 +67,36 @@ export default function VendorsPage() {
       await api.post('/api/vendors', {
         name: name.trim(),
         code: code.trim() || null,
+        reorder_mechanism: reorderMechanism.trim(),
         contact_email: contactEmail.trim() || null,
         contact_phone: contactPhone.trim() || null,
       });
       setSuccess('Vendor created.');
       setName('');
       setCode('');
+      setReorderMechanism('');
       setContactEmail('');
       setContactPhone('');
-      loadVendors();
+      loadVendors(search);
     } catch (e: any) {
       setError(e?.detail || e?.message || 'Failed to create vendor.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function deactivateVendor(vendorId: number) {
+    setDeactivatingVendorId(vendorId);
+    setError('');
+    setSuccess('');
+    try {
+      await api.delete(`/api/vendors/${vendorId}`);
+      setSuccess('Vendor deactivated.');
+      await loadVendors(search);
+    } catch (e: any) {
+      setError(e?.detail || e?.message || 'Failed to deactivate vendor.');
+    } finally {
+      setDeactivatingVendorId(null);
     }
   }
 
@@ -85,6 +115,7 @@ export default function VendorsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
           <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Vendor name" />
           <Input label="Code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Optional" />
+          <Input label="Reorder Mechanism" value={reorderMechanism} onChange={(e) => setReorderMechanism(e.target.value)} placeholder="Required (e.g. Send an email)" />
           <Input label="Contact Email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="Optional" />
           <Input label="Contact Phone" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="Optional" />
         </div>
@@ -94,7 +125,17 @@ export default function VendorsPage() {
       </Card>
 
       <Card padding={false}>
-        <div className="p-5 pb-0"><CardTitle>Vendor List</CardTitle></div>
+        <div className="p-5 pb-0">
+          <CardTitle>Vendor List</CardTitle>
+          <div className="mt-4 max-w-sm">
+            <Input
+              label="Search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search vendor name or mechanism"
+            />
+          </div>
+        </div>
         {loading ? (
           <div className="p-5 text-sm text-muted">Loading vendors...</div>
         ) : vendors.length === 0 ? (
@@ -105,20 +146,31 @@ export default function VendorsPage() {
               <thead>
                 <tr className="border-b border-border text-left text-muted">
                   <th className="py-2 px-5 font-medium">Name</th>
-                  <th className="py-2 px-3 font-medium">Code</th>
+                  <th className="py-2 px-3 font-medium">Reorder Method</th>
                   <th className="py-2 px-3 font-medium">Email</th>
                   <th className="py-2 px-3 font-medium">Phone</th>
                   <th className="py-2 px-5 font-medium">Status</th>
+                  <th className="py-2 px-5 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {vendors.map((v) => (
                   <tr key={v.id} className="border-b border-border/50">
                     <td className="py-2 px-5 font-medium">{v.name}</td>
-                    <td className="py-2 px-3">{v.code ?? '-'}</td>
+                    <td className="py-2 px-3 max-w-60 truncate" title={v.reorder_mechanism ?? ''}>{v.reorder_mechanism ?? '-'}</td>
                     <td className="py-2 px-3">{v.contact_email ?? '-'}</td>
                     <td className="py-2 px-3">{v.contact_phone ?? '-'}</td>
                     <td className="py-2 px-5">{v.is_active ? 'Active' : 'Inactive'}</td>
+                    <td className="py-2 px-5">
+                      <Button
+                        size="sm"
+                        variant="warning"
+                        disabled={!v.is_active || deactivatingVendorId === v.id}
+                        onClick={() => deactivateVendor(v.id)}
+                      >
+                        {deactivatingVendorId === v.id ? 'Deactivating...' : 'Deactivate'}
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

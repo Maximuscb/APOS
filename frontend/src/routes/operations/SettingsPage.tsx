@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/context/StoreContext';
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/lib/api';
@@ -6,302 +6,404 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardDescription, CardTitle } from '@/components/ui/Card';
 import { Input, Select } from '@/components/ui/Input';
 import { Tabs } from '@/components/ui/Tabs';
+import { Badge } from '@/components/ui/Badge';
 
-type StoreConfig = {
-  id: number;
-  store_id: number;
+type RegistryItem = {
   key: string;
-  value: string | null;
+  scope_allowed: string[];
+  type: string;
+  default_value_json: any;
+  validation_json: Record<string, any>;
+  description: string;
+  category: string;
+  subcategory: string | null;
+  is_sensitive: boolean;
+  is_developer_only: boolean;
+  requires_restart: boolean;
+  requires_reprice: boolean;
+  requires_recalc: boolean;
+  min_role_to_view: string | null;
+  min_role_to_edit: string | null;
 };
 
-type OrgSetting = {
-  id: number;
+type ScopeSettingItem = {
+  key: string;
+  scope_type: 'ORG' | 'STORE' | 'DEVICE' | 'USER';
+  scope_id: number;
+  value_json: any;
+  effective_value_json: any;
+  effective_source: string;
+  inherited: boolean;
+  registry: RegistryItem;
+};
+
+type ScopeResponse = {
+  scope_type: 'ORG' | 'STORE' | 'DEVICE' | 'USER';
+  scope_id: number;
   org_id: number;
-  key: string;
-  value: string | null;
-};
-
-type DeviceSettingRow = {
-  id: number;
-  device_id: number;
-  key: string;
-  value: string | null;
+  items: ScopeSettingItem[];
 };
 
 type RegisterOption = {
   id: number;
   name: string;
-  register_number: number;
+  register_number: string;
+  store_id: number;
 };
 
-interface SettingDef {
-  key: string;
-  label: string;
-  description: string;
-  type: 'text' | 'select' | 'number';
-  options?: { value: string; label: string }[];
-  defaultValue: string;
+function formatValue(v: any) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
 }
 
-const APPROVAL_MODE_OPTIONS = [
-  { value: 'MANAGER_ONLY', label: 'Manager Only' },
-  { value: 'DUAL_AUTH', label: 'Dual Auth' },
-];
-
-// Setting definitions for search filtering
-const storeSettings: SettingDef[] = [
-  { key: 'cash_drawer_approval_mode', label: 'Cash Drawer Approval Mode', description: 'Control how no-sale opens and cash drops are authorized', type: 'select', options: APPROVAL_MODE_OPTIONS, defaultValue: 'MANAGER_ONLY' },
-];
-
-const deviceSettings: SettingDef[] = [
-  { key: 'auto_logout_minutes', label: 'Auto-Logout Timer', description: 'Minutes of inactivity before automatic logout (0 = disabled)', type: 'number', defaultValue: '0' },
-];
+function getInputType(valueType: string): 'text' | 'number' | 'json' | 'enum' | 'bool' {
+  if (valueType === 'bool') return 'bool';
+  if (valueType === 'enum') return 'enum';
+  if (valueType === 'json') return 'json';
+  if (['int', 'decimal', 'decimal_cents', 'duration_seconds'].includes(valueType)) return 'number';
+  return 'text';
+}
 
 export default function SettingsPage() {
-  const { currentStoreId: storeId, stores } = useStore();
-  const { hasPermission } = useAuth();
-  const canManageOrganization = hasPermission('MANAGE_ORGANIZATION');
-  const canSwitchStore = hasPermission('MANAGE_STORES') && stores.length > 1;
+  const { currentStoreId, stores, setStoreId } = useStore();
+  const { user, hasPermission, isDeveloper } = useAuth();
 
-  const [activeTab, setActiveTab] = useState(canManageOrganization && canSwitchStore ? 'organization' : 'store');
+  const canViewOrg = hasPermission('VIEW_ORGANIZATION') || hasPermission('MANAGE_ORGANIZATION') || isDeveloper;
+  const canEditOrg = hasPermission('MANAGE_ORGANIZATION') || hasPermission('SYSTEM_ADMIN') || isDeveloper;
+  const canEditStore = hasPermission('MANAGE_STORES') || hasPermission('SYSTEM_ADMIN') || isDeveloper;
+  const canEditDevice = hasPermission('MANAGE_DEVICE_SETTINGS') || hasPermission('SYSTEM_ADMIN') || isDeveloper;
+
   const [search, setSearch] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [category, setCategory] = useState('');
+  const [scopeTab, setScopeTab] = useState<'organization' | 'store' | 'device' | 'user'>(
+    canViewOrg && stores.length > 1 ? 'organization' : 'store',
+  );
+  const [scopeData, setScopeData] = useState<ScopeResponse | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [busyKey, setBusyKey] = useState<string | null>(null);
 
-  // Store settings
-  const [cashDrawerMode, setCashDrawerMode] = useState('MANAGER_ONLY');
-  const [selectedStoreId, setSelectedStoreId] = useState(storeId);
-
-  // Organization settings
-  const [orgSettings, setOrgSettings] = useState<OrgSetting[]>([]);
-
-  // Device settings
-  const [, setDeviceSettingsData] = useState<DeviceSettingRow[]>([]);
+  const [selectedStoreId, setSelectedStoreId] = useState<number>(currentStoreId);
   const [registers, setRegisters] = useState<RegisterOption[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
-  const [autoLogoutMinutes, setAutoLogoutMinutes] = useState('0');
 
-
-  // Load store configs
   useEffect(() => {
-    if (!selectedStoreId) return;
-    setError('');
-    setSuccess('');
-    api.get<StoreConfig[]>(`/api/stores/${selectedStoreId}/configs`)
-      .then((rows) => {
-        const approvalMode = rows.find((r) => r.key === 'cash_drawer_approval_mode')?.value;
-        setCashDrawerMode((approvalMode ?? 'MANAGER_ONLY').toUpperCase());
+    setSelectedStoreId(currentStoreId);
+  }, [currentStoreId]);
+
+  useEffect(() => {
+    if (scopeTab !== 'device' || !selectedStoreId) return;
+    api.get<{ registers: RegisterOption[] }>(`/api/registers?store_id=${selectedStoreId}`)
+      .then((res) => {
+        const list = res.registers ?? [];
+        setRegisters(list);
+        if (list.length > 0) setSelectedDeviceId((prev) => prev ?? list[0].id);
       })
-      .catch((err: any) => setError(err?.detail ?? 'Failed to load store settings.'));
-  }, [selectedStoreId]);
+      .catch(() => {
+        setRegisters([]);
+        setSelectedDeviceId(null);
+      });
+  }, [scopeTab, selectedStoreId]);
 
-  // Load registers for device tab
-  useEffect(() => {
-    if (!selectedStoreId) return;
-    api.get<RegisterOption[]>(`/api/registers?store_id=${selectedStoreId}`)
-      .then((regs) => {
-        setRegisters(regs);
-        if (regs.length > 0 && !selectedDeviceId) setSelectedDeviceId(regs[0].id);
-      })
-      .catch(() => {});
-  }, [selectedStoreId]);
-
-  // Load device settings when device changes
-  useEffect(() => {
-    if (!selectedDeviceId) return;
-    api.get<DeviceSettingRow[]>(`/api/devices/${selectedDeviceId}/settings`)
-      .then((rows) => {
-        setDeviceSettingsData(rows);
-        const alm = rows.find((r) => r.key === 'auto_logout_minutes')?.value;
-        setAutoLogoutMinutes(alm ?? '0');
-      })
-      .catch(() => {});
-  }, [selectedDeviceId]);
-
-  // Load org settings
-  useEffect(() => {
-    if (!canManageOrganization) return;
-    api.get<OrgSetting[]>(`/api/organizations/1/settings`)
-      .then(setOrgSettings)
-      .catch(() => {});
-  }, [canManageOrganization]);
-
-  // Search filter
-  const searchLower = search.toLowerCase();
-  const matchesSearch = (def: SettingDef) =>
-    !search || def.label.toLowerCase().includes(searchLower) || def.description.toLowerCase().includes(searchLower);
-
-  const filteredStoreSettings = useMemo(() => storeSettings.filter(matchesSearch), [search]);
-  const filteredDeviceSettings = useMemo(() => deviceSettings.filter(matchesSearch), [search]);
-
-  async function saveStoreConfig(key: string, value: string) {
-    setSaving(true);
+  async function loadScope() {
     setError('');
     setSuccess('');
     try {
-      await api.put(`/api/stores/${selectedStoreId}/configs`, { key, value });
-      setSuccess('Setting saved.');
-    } catch (err: any) {
-      setError(err?.detail ?? 'Failed to save.');
-    } finally {
-      setSaving(false);
+      if (scopeTab === 'organization') {
+        if (!canViewOrg || stores.length === 0) {
+          setScopeData(null);
+          return;
+        }
+        const org = await api.get<ScopeResponse>('/api/settings/org/current');
+        setScopeData(org);
+      } else if (scopeTab === 'store') {
+        const store = await api.get<ScopeResponse>(`/api/settings/store/${selectedStoreId}`);
+        setScopeData(store);
+      } else if (scopeTab === 'device') {
+        if (!selectedDeviceId) {
+          setScopeData(null);
+          return;
+        }
+        const device = await api.get<ScopeResponse>(`/api/settings/device/${selectedDeviceId}`);
+        setScopeData(device);
+      } else {
+        const me = await api.get<ScopeResponse>(`/api/settings/user/${user?.id}`);
+        setScopeData(me);
+      }
+    } catch (e: any) {
+      setError(e?.detail || e?.message || 'Failed to load scoped settings.');
+      setScopeData(null);
     }
   }
 
-  async function saveDeviceSetting(key: string, value: string) {
-    if (!selectedDeviceId) return;
-    setSaving(true);
+  useEffect(() => {
+    loadScope();
+  }, [scopeTab, selectedStoreId, selectedDeviceId, user?.id]);
+
+  useEffect(() => {
+    if (!scopeData) return;
+    const next: Record<string, string> = {};
+    for (const item of scopeData.items) {
+      const base = item.value_json ?? item.effective_value_json;
+      next[item.key] = formatValue(base);
+    }
+    setDraft(next);
+  }, [scopeData?.scope_type, scopeData?.scope_id, scopeData?.items?.length]);
+
+  const categories = useMemo(() => {
+    const set = new Set((scopeData?.items ?? []).map((i) => i.registry.category));
+    return Array.from(set).sort();
+  }, [scopeData?.items]);
+
+  const filteredItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (scopeData?.items ?? []).filter((item) => {
+      if (category && item.registry.category !== category) return false;
+      if (!q) return true;
+      return (
+        item.key.toLowerCase().includes(q)
+        || (item.registry.description || '').toLowerCase().includes(q)
+        || (item.registry.subcategory || '').toLowerCase().includes(q)
+      );
+    });
+  }, [scopeData?.items, search, category]);
+
+  function canEditItem(item: ScopeSettingItem) {
+    if (scopeTab === 'organization') return canEditOrg;
+    if (scopeTab === 'store') return canEditStore;
+    if (scopeTab === 'device') return canEditDevice;
+    return item.scope_id === user?.id || hasPermission('EDIT_USER') || isDeveloper;
+  }
+
+  function parseDraftValue(item: ScopeSettingItem, raw: string): any {
+    const t = getInputType(item.registry.type);
+    if (t === 'bool') return raw === 'true';
+    if (t === 'number') return raw.trim() === '' ? null : Number(raw);
+    if (t === 'json') return raw.trim() === '' ? null : JSON.parse(raw);
+    return raw;
+  }
+
+  async function saveItem(item: ScopeSettingItem) {
+    const pathBase =
+      item.scope_type === 'ORG' ? `/api/settings/org/${item.scope_id}`
+        : item.scope_type === 'STORE' ? `/api/settings/store/${item.scope_id}`
+          : item.scope_type === 'DEVICE' ? `/api/settings/device/${item.scope_id}`
+            : `/api/settings/user/${item.scope_id}`;
+    setBusyKey(item.key);
     setError('');
     setSuccess('');
     try {
-      await api.put(`/api/devices/${selectedDeviceId}/settings`, { key, value });
-      setSuccess('Device setting saved.');
-    } catch (err: any) {
-      setError(err?.detail ?? 'Failed to save.');
+      const value_json = parseDraftValue(item, draft[item.key] ?? '');
+      const res = await api.patch<{ errors?: Array<{ key: string; error: string }> }>(pathBase, {
+        updates: [{ key: item.key, value_json }],
+      });
+      if (Array.isArray(res.errors) && res.errors.length > 0) {
+        throw new Error(res.errors[0].error || 'Failed to save setting.');
+      }
+      setSuccess(`Saved ${item.key}`);
+      await loadScope();
+    } catch (e: any) {
+      setError(e?.detail || e?.message || `Failed to save ${item.key}.`);
     } finally {
-      setSaving(false);
+      setBusyKey(null);
     }
   }
 
-  const tabs = [];
-  if (canManageOrganization && canSwitchStore) {
-    tabs.push({ value: 'organization', label: 'Organization' });
+  async function clearOverride(item: ScopeSettingItem) {
+    const pathBase =
+      item.scope_type === 'ORG' ? `/api/settings/org/${item.scope_id}`
+        : item.scope_type === 'STORE' ? `/api/settings/store/${item.scope_id}`
+          : item.scope_type === 'DEVICE' ? `/api/settings/device/${item.scope_id}`
+            : `/api/settings/user/${item.scope_id}`;
+    setBusyKey(item.key);
+    setError('');
+    setSuccess('');
+    try {
+      const res = await api.patch<{ errors?: Array<{ key: string; error: string }> }>(pathBase, {
+        updates: [{ key: item.key, unset: true }],
+      });
+      if (Array.isArray(res.errors) && res.errors.length > 0) {
+        throw new Error(res.errors[0].error || 'Failed to clear override.');
+      }
+      setSuccess(`Cleared ${item.key}`);
+      await loadScope();
+    } catch (e: any) {
+      setError(e?.detail || e?.message || `Failed to clear ${item.key}.`);
+    } finally {
+      setBusyKey(null);
+    }
   }
-  tabs.push({ value: 'store', label: 'Store' });
-  tabs.push({ value: 'device', label: 'Device' });
+
+  const topTabs = [
+    ...(canViewOrg && stores.length > 1 ? [{ value: 'organization', label: 'Organization' }] : []),
+    { value: 'store', label: 'Store' },
+    { value: 'device', label: 'Device' },
+    { value: 'user', label: 'User' },
+  ];
 
   return (
-    <div className="flex flex-col gap-6 max-w-4xl mx-auto">
+    <div className="flex flex-col gap-5 max-w-6xl mx-auto">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
-        <p className="text-sm text-muted mt-1">Configure operational policies and preferences.</p>
+        <p className="text-sm text-muted mt-1">Unified configuration with precedence: USER &gt; DEVICE &gt; STORE &gt; ORG &gt; SYSTEM DEFAULT.</p>
       </div>
 
-      {/* Search */}
-      <Input
-        placeholder="Search settings..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-      />
-
-      <Tabs tabs={tabs} value={activeTab} onValueChange={setActiveTab} />
-
-      {error && (
-        <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>
+      {scopeTab === 'organization' && stores.length > 1 && (
+        <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+          Changes at Organization scope can impact all stores.
+        </div>
       )}
-      {success && (
-        <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">{success}</div>
-      )}
-
-      {/* Organization Tab */}
-      {activeTab === 'organization' && (
-        <div className="space-y-4">
-          {stores.length > 1 && (
-            <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
-              Organization settings apply to all stores. Changes here affect every location.
-            </div>
-          )}
-          <Card>
-            <CardTitle>Organization Settings</CardTitle>
-            <CardDescription>Organization-wide configuration. These settings are surfaced in Store Settings when only one store exists.</CardDescription>
-            {orgSettings.length === 0 ? (
-              <p className="text-sm text-muted mt-3">No organization-level settings configured.</p>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {orgSettings.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                    <span className="text-sm font-medium">{s.key}</span>
-                    <span className="text-sm text-muted">{s.value ?? '(not set)'}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
+      {scopeTab === 'device' && (
+        <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
+          Some device settings require app/device restart before taking effect.
         </div>
       )}
 
-      {/* Store Tab */}
-      {activeTab === 'store' && (
-        <div className="space-y-4">
-          {canSwitchStore && (
+      <Tabs tabs={topTabs} value={scopeTab} onValueChange={(v) => setScopeTab(v as any)} />
+
+      <Card>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {(scopeTab === 'store' || scopeTab === 'device') && (
             <Select
               label="Store"
               value={String(selectedStoreId)}
-              onChange={(e) => setSelectedStoreId(Number(e.target.value))}
+              onChange={(e) => {
+                const next = Number(e.target.value);
+                setSelectedStoreId(next);
+                if (scopeTab !== 'device') setStoreId(next);
+              }}
               options={stores.map((s) => ({ value: String(s.id), label: s.name }))}
             />
           )}
-
-          {filteredStoreSettings.map((def) => (
-            <Card key={def.key}>
-              <CardTitle>{def.label}</CardTitle>
-              <CardDescription>{def.description}</CardDescription>
-              <div className="mt-4 max-w-sm">
-                {def.type === 'select' && def.options ? (
-                  <Select
-                    label=""
-                    value={cashDrawerMode}
-                    onChange={(e) => setCashDrawerMode(e.target.value)}
-                    options={def.options}
-                  />
-                ) : null}
-              </div>
-              <div className="mt-4">
-                <Button onClick={() => saveStoreConfig(def.key, cashDrawerMode)} disabled={saving}>
-                  {saving ? 'Saving...' : 'Save'}
-                </Button>
-              </div>
-            </Card>
-          ))}
-
-          {filteredStoreSettings.length === 0 && search && (
-            <p className="text-sm text-muted">No store settings match your search.</p>
+          {scopeTab === 'device' && (
+            <Select
+              label="Device"
+              value={String(selectedDeviceId ?? '')}
+              onChange={(e) => setSelectedDeviceId(Number(e.target.value))}
+              options={(registers ?? []).map((r) => ({ value: String(r.id), label: `${r.name} (#${r.register_number})` }))}
+            />
           )}
+          <Input label="Search" placeholder="Search by key or description" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Select
+            label="Category"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            options={[{ value: '', label: 'All categories' }, ...categories.map((c) => ({ value: c, label: c }))]}
+          />
         </div>
+      </Card>
+
+      {error && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {success && <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">{success}</div>}
+
+      {scopeData && filteredItems.length === 0 && (
+        <Card>
+          <p className="text-sm text-muted">No settings matched your filters.</p>
+        </Card>
       )}
 
-      {/* Device Tab */}
-      {activeTab === 'device' && (
-        <div className="space-y-4">
-          {registers.length > 0 ? (
-            <>
-              <Select
-                label="Device"
-                value={String(selectedDeviceId ?? '')}
-                onChange={(e) => setSelectedDeviceId(Number(e.target.value))}
-                options={registers.map((r) => ({ value: String(r.id), label: `${r.name} (#${r.register_number})` }))}
-              />
+      {filteredItems.map((item) => {
+        const inputType = getInputType(item.registry.type);
+        const options = item.registry.validation_json?.enum as string[] | undefined;
+        const canEdit = canEditItem(item);
+        return (
+          <Card key={item.key}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">{item.key}</CardTitle>
+                <CardDescription>{item.registry.description || 'No description provided.'}</CardDescription>
+                <div className="flex items-center gap-2 mt-2">
+                  <Badge variant={item.inherited ? 'muted' : 'primary'}>
+                    {item.inherited ? 'Inherited' : 'Override'}
+                  </Badge>
+                  <Badge variant="muted">{item.effective_source}</Badge>
+                  {item.registry.requires_restart && <Badge variant="warning">Restart Required</Badge>}
+                  {item.registry.requires_reprice && <Badge variant="warning">Reprice Impact</Badge>}
+                  {item.registry.requires_recalc && <Badge variant="warning">Recalc Impact</Badge>}
+                </div>
+              </div>
+              <div className="text-xs text-muted">
+                <div>{item.registry.category}</div>
+                <div>{item.registry.subcategory || '-'}</div>
+              </div>
+            </div>
 
-              {filteredDeviceSettings.map((def) => (
-                <Card key={def.key}>
-                  <CardTitle>{def.label}</CardTitle>
-                  <CardDescription>{def.description}</CardDescription>
-                  <div className="mt-4 max-w-sm">
-                    <Input
-                      type="number"
-                      value={autoLogoutMinutes}
-                      onChange={(e) => setAutoLogoutMinutes(e.target.value)}
-                    />
-                  </div>
-                  <div className="mt-4">
-                    <Button onClick={() => saveDeviceSetting(def.key, autoLogoutMinutes)} disabled={saving}>
-                      {saving ? 'Saving...' : 'Save'}
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-
-              {filteredDeviceSettings.length === 0 && search && (
-                <p className="text-sm text-muted">No device settings match your search.</p>
+            <div className="mt-4">
+              {inputType === 'bool' && (
+                <Select
+                  label="Value"
+                  value={(draft[item.key] ?? String(Boolean(item.value_json ?? item.effective_value_json))) as string}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, [item.key]: e.target.value }))}
+                  options={[{ value: 'true', label: 'True' }, { value: 'false', label: 'False' }]}
+                  disabled={!canEdit}
+                />
               )}
-            </>
-          ) : (
-            <Card className="p-6 text-center text-muted">
-              No devices registered for this store. Create a register first.
-            </Card>
-          )}
-        </div>
+              {inputType === 'enum' && (
+                <Select
+                  label="Value"
+                  value={draft[item.key] ?? String(item.value_json ?? item.effective_value_json ?? '')}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, [item.key]: e.target.value }))}
+                  options={(options ?? []).map((v) => ({ value: v, label: v }))}
+                  disabled={!canEdit}
+                />
+              )}
+              {inputType === 'json' && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-sm font-medium text-slate-700">Value (JSON)</label>
+                  <textarea
+                    className="min-h-32 px-3 py-2 rounded-xl border border-border bg-white text-sm focus:outline-2 focus:outline-primary"
+                    value={draft[item.key] ?? ''}
+                    onChange={(e) => setDraft((prev) => ({ ...prev, [item.key]: e.target.value }))}
+                    disabled={!canEdit}
+                  />
+                </div>
+              )}
+              {inputType !== 'bool' && inputType !== 'enum' && inputType !== 'json' && (
+                <Input
+                  label="Value"
+                  type={inputType === 'number' ? 'number' : 'text'}
+                  value={draft[item.key] ?? ''}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, [item.key]: e.target.value }))}
+                  disabled={!canEdit}
+                />
+              )}
+            </div>
+
+            <div className="mt-4 flex gap-2">
+              <Button size="sm" onClick={() => saveItem(item)} disabled={!canEdit || busyKey === item.key}>
+                {busyKey === item.key ? 'Saving...' : 'Override Here'}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={() => clearOverride(item)} disabled={!canEdit || item.inherited || busyKey === item.key}>
+                Clear Override
+              </Button>
+            </div>
+          </Card>
+        );
+      })}
+
+      {stores.length <= 1 && scopeTab === 'store' && canViewOrg && (
+        <Card>
+          <CardTitle>Organization Scope in Single-Store Mode</CardTitle>
+          <CardDescription>
+            This organization has a single store. Organization settings are still stored at ORG scope and can be managed from this page.
+          </CardDescription>
+          <div className="mt-3">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setScopeTab('organization')}
+              disabled={!canViewOrg}
+            >
+              Open Organization Settings
+            </Button>
+          </div>
+        </Card>
       )}
     </div>
   );

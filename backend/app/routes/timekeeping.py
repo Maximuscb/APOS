@@ -14,7 +14,7 @@ from flask import Blueprint, request, jsonify, g
 from ..decorators import require_auth, require_permission, require_any_permission
 from ..services import timekeeping_service
 from ..extensions import db
-from ..models import TimeClockEntry
+from ..models import TimeClockEntry, User
 from ..services.timekeeping_service import TimekeepingError
 from ..services.tenant_service import require_store_in_org, TenantAccessError, get_org_store_ids
 from app.time_utils import parse_iso_datetime
@@ -114,7 +114,56 @@ def list_entries_route():
         query = query.filter(TimeClockEntry.store_id.in_(store_ids))
 
     entries = query.order_by(TimeClockEntry.clock_in_at.desc()).limit(500).all()
-    return jsonify({"entries": [e.to_dict() for e in entries], "count": len(entries)})
+
+    # Batch-resolve usernames
+    user_ids = {e.user_id for e in entries}
+    users = {u.id: u.username for u in db.session.query(User.id, User.username).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+
+    result = []
+    for e in entries:
+        d = e.to_dict()
+        d["username"] = users.get(e.user_id)
+        result.append(d)
+
+    return jsonify({"entries": result, "count": len(result)})
+
+
+@timekeeping_bp.patch("/entries/<int:entry_id>")
+@require_auth
+@require_permission("MANAGE_TIMEKEEPING")
+def edit_entry_route(entry_id: int):
+    data = request.get_json(silent=True) or {}
+    reason = data.get("reason")
+    if not reason or not str(reason).strip():
+        return jsonify({"error": "reason is required"}), 400
+
+    clock_in_at = None
+    if "clock_in_at" in data and data["clock_in_at"]:
+        clock_in_at = parse_iso_datetime(data["clock_in_at"])
+        if not clock_in_at:
+            return jsonify({"error": "Invalid clock_in_at"}), 400
+
+    clock_out_at = None
+    if "clock_out_at" in data and data["clock_out_at"]:
+        clock_out_at = parse_iso_datetime(data["clock_out_at"])
+        if not clock_out_at:
+            return jsonify({"error": "Invalid clock_out_at"}), 400
+
+    # Use sentinel for notes to distinguish "not provided" from "set to null"
+    notes = data.get("notes", ...) if "notes" in data else ...
+
+    try:
+        entry, edit_log = timekeeping_service.edit_entry(
+            entry_id=entry_id,
+            edited_by_user_id=g.current_user.id,
+            clock_in_at=clock_in_at,
+            clock_out_at=clock_out_at,
+            notes=notes,
+            reason=reason,
+        )
+        return jsonify({"entry": entry.to_dict(), "edit_log": edit_log.to_dict()})
+    except TimekeepingError as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @timekeeping_bp.post("/corrections")

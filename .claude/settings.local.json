@@ -9,7 +9,8 @@
       "Bash($env:FLASK_APP=\"wsgi.py\")",
       "Bash(python -c:*)",
       "Bash(cd:*)",
-      "Bash(del \"c:\\\\Users\\\\Baldw\\\\Computer Science\\\\APOS 1.3\\\\frontend\\\\src\\\\routes\\\\operations\\\\AuditsPage.tsx\")"
+      "Bash(del \"c:\\\\Users\\\\Baldw\\\\Computer Science\\\\APOS 1.3\\\\frontend\\\\src\\\\routes\\\\operations\\\\AuditsPage.tsx\")",
+      "Bash(python -m pytest:*)"
     ]
   }
 }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from flask import Blueprint, jsonify, request, g
 from sqlalchemy.exc import IntegrityError
 
@@ -10,6 +12,13 @@ from ..services import session_service
 from ..services.ledger_service import ensure_org_master_ledger
 
 developer_bp = Blueprint("developer", __name__, url_prefix="/api/developer")
+
+
+@developer_bp.before_request
+def _check_developer_tools_enabled():
+    """Kill switch: set APOS_DEVELOPER_TOOLS=false to disable all developer endpoints."""
+    if os.environ.get("APOS_DEVELOPER_TOOLS", "true").lower() == "false":
+        return jsonify({"error": "Developer tools are disabled in this environment"}), 403
 
 
 @developer_bp.route("/organizations", methods=["GET"])

@@ -147,7 +147,9 @@ export function RegisterPage() {
     setClockBusy(true);
     setClockError(null);
     try {
-      if (clockStatus?.status === 'clocked_in') {
+      const status = (clockStatus?.status ?? '').toUpperCase();
+      const isClockedIn = status === 'CLOCKED_IN' || status === 'ON_BREAK';
+      if (isClockedIn) {
         await api.post('/api/timekeeping/clock-out', {});
       } else {
         await api.post('/api/timekeeping/clock-in', { store_id: storeId });
@@ -155,6 +157,21 @@ export function RegisterPage() {
       await loadClockStatus();
     } catch (e: any) {
       setClockError(e?.detail || e?.message || 'Unable to update clock status.');
+    } finally {
+      setClockBusy(false);
+    }
+  }
+
+  async function clockOutFromWorkspace() {
+    setClockBusy(true);
+    setClockError(null);
+    try {
+      await api.post('/api/timekeeping/clock-out', {});
+      await loadClockStatus();
+    } catch (e: any) {
+      const message = e?.detail || e?.message || 'Unable to clock out.';
+      setClockError(message);
+      throw e;
     } finally {
       setClockBusy(false);
     }
@@ -201,7 +218,11 @@ export function RegisterPage() {
               {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
             </Button>
             <Button variant="ghost" size="sm" onClick={toggleClock} disabled={clockBusy}>
-              {clockBusy ? 'Working...' : clockStatus?.status === 'clocked_in' ? 'Clock Out' : 'Clock In'}
+              {clockBusy
+                ? 'Working...'
+                : ((clockStatus?.status ?? '').toUpperCase() === 'CLOCKED_IN' || (clockStatus?.status ?? '').toUpperCase() === 'ON_BREAK')
+                  ? 'Clock Out'
+                  : 'Clock In'}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowDrawerModal('NO_SALE')} disabled={!hasManagerPermission} title={hasManagerPermission ? 'Open drawer' : 'Manager required'}>
               Open Drawer
@@ -228,6 +249,9 @@ export function RegisterPage() {
           products={products}
           registerId={registerId}
           sessionId={sessionId}
+          clockStatus={clockStatus?.status ?? null}
+          clockBusy={clockBusy}
+          onClockOut={clockOutFromWorkspace}
         />
       </div>
 

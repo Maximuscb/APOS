@@ -24,7 +24,7 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     # MULTI-TENANT: User belongs to exactly one organization (nullable for developer users)
-    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=True, index=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=True)
 
     username = db.Column(db.String(64), nullable=False, index=True)
     email = db.Column(db.String(255), nullable=False)
@@ -131,7 +131,7 @@ class Role(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     # MULTI-TENANT: Roles belong to organizations
-    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False)
 
     name = db.Column(db.String(64), nullable=False)
     description = db.Column(db.Text, nullable=True)
@@ -265,7 +265,7 @@ class SessionToken(db.Model):
 
     # MULTI-TENANT: Tenant context captured at session creation
     # org_id is nullable for developer sessions (developer must switch org before accessing data)
-    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=True, index=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=True)
     # store_id is the user's primary/current store (nullable for org-level users)
     store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=True, index=True)
 

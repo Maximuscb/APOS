@@ -40,6 +40,7 @@ def create_vendor(
     contact_name: str | None = None,
     contact_email: str | None = None,
     contact_phone: str | None = None,
+    reorder_mechanism: str | None = None,
     address: str | None = None,
     notes: str | None = None,
     created_by_user_id: int | None = None,
@@ -54,6 +55,7 @@ def create_vendor(
         contact_name: Primary contact name
         contact_email: Contact email
         contact_phone: Contact phone
+        reorder_mechanism: Required process for placing reorder requests
         address: Vendor address
         notes: Additional notes
         created_by_user_id: User creating the vendor (for audit)
@@ -75,6 +77,11 @@ def create_vendor(
     if not name or not name.strip():
         raise VendorValidationError("Vendor name is required")
     name = name.strip()
+
+    # Validate reorder mechanism
+    if not reorder_mechanism or not reorder_mechanism.strip():
+        raise VendorValidationError("reorder_mechanism is required")
+    reorder_mechanism = reorder_mechanism.strip()
 
     # Normalize code
     if code:
@@ -99,6 +106,7 @@ def create_vendor(
         contact_name=contact_name,
         contact_email=contact_email,
         contact_phone=contact_phone,
+        reorder_mechanism=reorder_mechanism,
         address=address,
         notes=notes,
         is_active=True,
@@ -134,6 +142,7 @@ def update_vendor(
     contact_name: str | None = None,
     contact_email: str | None = None,
     contact_phone: str | None = None,
+    reorder_mechanism: str | None = None,
     address: str | None = None,
     notes: str | None = None,
     updated_by_user_id: int | None = None,
@@ -193,6 +202,11 @@ def update_vendor(
         vendor.contact_email = contact_email
     if contact_phone is not None:
         vendor.contact_phone = contact_phone
+    if reorder_mechanism is not None:
+        reorder_mechanism = reorder_mechanism.strip()
+        if not reorder_mechanism:
+            raise VendorValidationError("reorder_mechanism cannot be empty")
+        vendor.reorder_mechanism = reorder_mechanism
     if address is not None:
         vendor.address = address
     if notes is not None:
@@ -272,7 +286,7 @@ def list_vendors(
     Args:
         org_id: Organization ID
         include_inactive: If True, include inactive vendors
-        search: Optional search term for name or code
+        search: Optional search term for name, code, or reorder mechanism
         limit: Maximum number of results
         offset: Offset for pagination
 
@@ -290,6 +304,7 @@ def list_vendors(
             db.or_(
                 Vendor.name.ilike(search_term),
                 Vendor.code.ilike(search_term),
+                Vendor.reorder_mechanism.ilike(search_term),
             )
         )
 

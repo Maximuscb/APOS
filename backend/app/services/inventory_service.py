@@ -188,6 +188,38 @@ def get_recent_receive_cost_cents(
     return tx.unit_cost_cents if tx else None
 
 
+def _receive_inventory_inner(
+    *,
+    store_id: int,
+    product_id: int,
+    quantity: int,
+    unit_cost_cents: int,
+    occurred_dt: datetime,
+    note: str | None = None,
+    status: str = "POSTED",
+    posted_by_user_id: int | None = None,
+) -> InventoryTransaction:
+    """Core RECEIVE logic without locking, retry, future-guard, or commit.
+
+    Called by both the public receive_inventory() and import schemas.
+    """
+    tx = InventoryTransaction(
+        store_id=store_id,
+        product_id=product_id,
+        type="RECEIVE",
+        quantity_delta=quantity,
+        unit_cost_cents=unit_cost_cents,
+        note=note,
+        occurred_at=occurred_dt,
+        status=status,
+        posted_by_user_id=posted_by_user_id,
+        posted_at=utcnow() if posted_by_user_id else None,
+    )
+    db.session.add(tx)
+    db.session.flush()
+    return tx
+
+
 def receive_inventory(
     *,
     store_id: int,
@@ -218,18 +250,15 @@ def receive_inventory(
         if occurred_dt > (now + timedelta(minutes=2)):
             raise ValueError("occurred_at cannot be in the future")
 
-        tx = InventoryTransaction(
+        tx = _receive_inventory_inner(
             store_id=store_id,
             product_id=product_id,
-            type="RECEIVE",
-            quantity_delta=quantity,
+            quantity=quantity,
             unit_cost_cents=unit_cost_cents,
+            occurred_dt=occurred_dt,
             note=note,
-            occurred_at=occurred_dt,
-            status=status,  # Lifecycle status
+            status=status,
         )
-        db.session.add(tx)
-        db.session.flush()  # ensure tx.id is assigned before we reference it
 
         # Only append to master ledger if POSTED
         # DRAFT and APPROVED transactions don't affect ledger until posted
@@ -250,6 +279,37 @@ def receive_inventory(
 
     return run_with_retry(_op)
 
+
+
+def _adjust_inventory_inner(
+    *,
+    store_id: int,
+    product_id: int,
+    quantity_delta: int,
+    occurred_dt: datetime,
+    note: str | None = None,
+    status: str = "POSTED",
+    posted_by_user_id: int | None = None,
+) -> InventoryTransaction:
+    """Core ADJUST logic without locking, retry, future-guard, or commit.
+
+    Called by both the public adjust_inventory() and import schemas.
+    """
+    tx = InventoryTransaction(
+        store_id=store_id,
+        product_id=product_id,
+        type="ADJUST",
+        quantity_delta=quantity_delta,
+        unit_cost_cents=None,
+        note=note,
+        occurred_at=occurred_dt,
+        status=status,
+        posted_by_user_id=posted_by_user_id,
+        posted_at=utcnow() if posted_by_user_id else None,
+    )
+    db.session.add(tx)
+    db.session.flush()
+    return tx
 
 
 def adjust_inventory(
@@ -289,18 +349,14 @@ def adjust_inventory(
             if current + quantity_delta < 0:
                 raise ValueError("adjustment would make on-hand negative")
 
-        tx = InventoryTransaction(
+        tx = _adjust_inventory_inner(
             store_id=store_id,
             product_id=product_id,
-            type="ADJUST",
             quantity_delta=quantity_delta,
-            unit_cost_cents=None,
+            occurred_dt=occurred_dt,
             note=note,
-            occurred_at=occurred_dt,
-            status=status,  # Lifecycle status
+            status=status,
         )
-        db.session.add(tx)
-        db.session.flush()  # ensure tx.id is assigned before we reference it
 
         # Only append to master ledger if POSTED
         if status == "POSTED":
@@ -356,6 +412,70 @@ def list_inventory_transactions(*, store_id: int, product_id: int, limit: int = 
 
     return q.limit(limit).all()
 
+def _sell_inventory_inner(
+    *,
+    store_id: int,
+    product_id: int,
+    quantity: int,
+    sale_id: str,
+    sale_line_id: str,
+    occurred_dt: datetime,
+    note: str | None = None,
+    status: str = "POSTED",
+    posted_by_user_id: int | None = None,
+    skip_negative_check: bool = False,
+) -> InventoryTransaction:
+    """Core SALE logic without locking, retry, future-guard, or commit.
+
+    Called by both the public sell_inventory() and import schemas.
+    Computes WAC as-of occurred_dt and snapshots unit_cost_cents_at_sale / cogs_cents.
+    """
+    # Idempotency: if already posted, return it
+    existing = InventoryTransaction.query.filter_by(
+        store_id=store_id,
+        sale_id=sale_id,
+        sale_line_id=sale_line_id,
+    ).first()
+    if existing is not None:
+        if existing.type != "SALE" or existing.product_id != product_id:
+            raise ValueError("sale_id/sale_line_id already used for a different transaction")
+        return existing
+
+    if status == "POSTED":
+        if not skip_negative_check:
+            current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
+            if current - quantity < 0:
+                raise ValueError("sale would make on-hand negative")
+
+        wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
+        if wac is None:
+            raise ValueError("cannot sell without a cost basis (no RECEIVE history as-of occurred_at)")
+    else:
+        wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
+        if wac is None:
+            wac = 0
+
+    tx = InventoryTransaction(
+        store_id=store_id,
+        product_id=product_id,
+        type="SALE",
+        quantity_delta=-quantity,
+        unit_cost_cents=None,
+        sale_id=sale_id,
+        sale_line_id=sale_line_id,
+        unit_cost_cents_at_sale=wac,
+        cogs_cents=wac * quantity,
+        note=note,
+        occurred_at=occurred_dt,
+        status=status,
+        posted_by_user_id=posted_by_user_id,
+        posted_at=utcnow() if posted_by_user_id else None,
+    )
+    db.session.add(tx)
+    db.session.flush()
+    return tx
+
+
 def sell_inventory(
     *,
     store_id: int,
@@ -388,53 +508,17 @@ def sell_inventory(
         if occurred_dt > (now + timedelta(minutes=2)):
             raise ValueError("occurred_at cannot be in the future")
 
-        # Idempotency: if already posted, return it
-        existing = InventoryTransaction.query.filter_by(
-            store_id=store_id,
-            sale_id=sale_id,
-            sale_line_id=sale_line_id,
-        ).first()
-        if existing is not None:
-            if existing.type != "SALE" or existing.product_id != product_id:
-                raise ValueError("sale_id/sale_line_id already used for a different transaction")
-            return existing
-
-        # Only perform business rule checks for POSTED transactions
-        # DRAFT sales don't affect inventory, so no need to check oversell or WAC
-        if status == "POSTED":
-            # Oversell check at effective time
-            current = get_quantity_on_hand(store_id, product_id, as_of=occurred_dt)
-            if current - quantity < 0:
-                raise ValueError("sale would make on-hand negative")
-
-            # Snapshot WAC at sale time
-            wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
-            if wac is None:
-                raise ValueError("cannot sell without a cost basis (no RECEIVE history as-of occurred_at)")
-        else:
-            # For DRAFT sales, we still snapshot WAC for reference, but don't enforce it
-            wac = get_weighted_average_cost_cents(store_id, product_id, as_of=occurred_dt)
-            if wac is None:
-                wac = 0  # Placeholder; will be recalculated on posting
-
-        tx = InventoryTransaction(
+        tx = _sell_inventory_inner(
             store_id=store_id,
             product_id=product_id,
-            type="SALE",
-            quantity_delta=-quantity,
-            unit_cost_cents=None,
+            quantity=quantity,
             sale_id=sale_id,
             sale_line_id=sale_line_id,
-            unit_cost_cents_at_sale=wac,
-            cogs_cents=wac * quantity,
+            occurred_dt=occurred_dt,
             note=note,
-            occurred_at=occurred_dt,
-            status=status,  # Lifecycle status
+            status=status,
             posted_by_user_id=posted_by_user_id,
-            posted_at=utcnow() if posted_by_user_id else None,
         )
-        db.session.add(tx)
-        db.session.flush()
 
         # Only append to master ledger if POSTED
         if status == "POSTED":

@@ -290,7 +290,7 @@ class Vendor(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False)
 
     name = db.Column(db.String(255), nullable=False)
     code = db.Column(db.String(64), nullable=True, index=True)  # Optional short code for quick lookup
@@ -299,6 +299,8 @@ class Vendor(db.Model):
     contact_name = db.Column(db.String(255), nullable=True)
     contact_email = db.Column(db.String(255), nullable=True)
     contact_phone = db.Column(db.String(64), nullable=True)
+    # Required business process for reordering from this vendor (e.g. "Send an email")
+    reorder_mechanism = db.Column(db.String(255), nullable=True)
     address = db.Column(db.Text, nullable=True)
 
     # Status
@@ -327,6 +329,7 @@ class Vendor(db.Model):
             "contact_name": self.contact_name,
             "contact_email": self.contact_email,
             "contact_phone": self.contact_phone,
+            "reorder_mechanism": self.reorder_mechanism,
             "address": self.address,
             "is_active": self.is_active,
             "notes": self.notes,
