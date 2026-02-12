@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 interface Column<T> {
   key: string;
   header: string;
-  render: (row: T) => ReactNode;
+  render?: (row: T) => ReactNode;
   className?: string;
 }
 
@@ -15,6 +15,12 @@ interface DataTableProps<T> {
 }
 
 export function DataTable<T>({ columns, data, onRowClick, emptyMessage = 'No data' }: DataTableProps<T>) {
+  const defaultRender = (row: T, key: string): ReactNode => {
+    const value = (row as Record<string, unknown>)[key];
+    if (value == null) return '';
+    return String(value);
+  };
+
   return (
     <div className="overflow-x-auto rounded-xl border border-border">
       <table className="w-full text-sm">
@@ -43,7 +49,7 @@ export function DataTable<T>({ columns, data, onRowClick, emptyMessage = 'No dat
               >
                 {columns.map((col) => (
                   <td key={col.key} className={`px-4 py-3 ${col.className || ''}`}>
-                    {col.render(row)}
+                    {col.render ? col.render(row) : defaultRender(row, col.key)}
                   </td>
                 ))}
               </tr>

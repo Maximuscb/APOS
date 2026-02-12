@@ -23,6 +23,10 @@ function buildParams(filters: ReportFiltersState) {
   return p;
 }
 
+function safeMoney(value: unknown): string {
+  return formatMoney(typeof value === 'number' && Number.isFinite(value) ? value : 0);
+}
+
 const ISSUE_VARIANT: Record<string, 'danger' | 'warning' | 'muted'> = {
   COST_EXCEEDS_PRICE: 'danger',
   BELOW_THRESHOLD: 'warning',
@@ -52,6 +56,61 @@ export function ProfitabilityReports({ filters, onFiltersChange }: Props) {
       ]
     : [];
 
+  const outlierRows = useMemo(() => {
+    const rows = Array.isArray(outliers.data?.rows) ? outliers.data.rows : [];
+    return rows.flatMap((row) => {
+      const r = row as MarginOutlierRow & {
+        flags?: unknown;
+        issue?: unknown;
+        wac_cents?: unknown;
+      };
+      const flags = Array.isArray(r.flags) ? r.flags.filter((v): v is string => typeof v === 'string') : [];
+      const costCents = typeof r.cost_cents === 'number'
+        ? r.cost_cents
+        : typeof r.wac_cents === 'number'
+          ? r.wac_cents
+          : null;
+
+      if (flags.length > 0) {
+        return flags.map((flag) => ({
+          ...row,
+          issue: flag,
+          cost_cents: costCents,
+        }));
+      }
+
+      const issue = typeof r.issue === 'string' && r.issue.trim() ? r.issue : 'UNKNOWN';
+      return [{
+        ...row,
+        issue,
+        cost_cents: costCents,
+      }];
+    });
+  }, [outliers.data]);
+
+  const discountRows = useMemo(() => {
+    const employees = Array.isArray(discounts.data?.by_employee) ? discounts.data.by_employee : [];
+    return employees.map((row) => {
+      const r = row as {
+        discount_count?: unknown;
+        lines_discounted?: unknown;
+        discount_total_cents?: unknown;
+        discount_cents?: unknown;
+      } & Record<string, unknown>;
+      const discountCount = typeof r.discount_count === 'number'
+        ? r.discount_count
+        : typeof r.lines_discounted === 'number'
+          ? r.lines_discounted
+          : 0;
+      const discountTotalCents = typeof r.discount_total_cents === 'number'
+        ? r.discount_total_cents
+        : typeof r.discount_cents === 'number'
+          ? r.discount_cents
+          : 0;
+      return { ...row, discount_count: discountCount, discount_total_cents: discountTotalCents };
+    });
+  }, [discounts.data]);
+
   return (
     <div className="flex flex-col gap-6">
       <Card>
@@ -80,11 +139,11 @@ export function ProfitabilityReports({ filters, onFiltersChange }: Props) {
               <div className="h-48 mt-2">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={marginPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={({ name, value }) => `${name}: ${formatMoney(value)}`}>
+                    <Pie data={marginPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={(entry: any) => `${entry?.name ?? 'Unknown'}: ${safeMoney(entry?.value)}`}>
                       <Cell fill="#ef4444" />
                       <Cell fill="#10b981" />
                     </Pie>
-                    <Tooltip formatter={(value: number) => formatMoney(value)} />
+                    <Tooltip formatter={(value: unknown) => safeMoney(value)} />
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>
@@ -99,16 +158,16 @@ export function ProfitabilityReports({ filters, onFiltersChange }: Props) {
         <div className="p-5 pb-0 flex items-center justify-between">
           <div>
             <CardTitle>Product Margin Outliers</CardTitle>
-            <CardDescription>{outliers.data?.rows.length ?? 0} products flagged</CardDescription>
+            <CardDescription>{outlierRows.length} products flagged</CardDescription>
           </div>
-          {outliers.data && outliers.data.rows.length > 0 && (
+          {outlierRows.length > 0 && (
             <Button variant="ghost" onClick={() => exportToCsv(
               [
                 { key: 'sku', header: 'SKU' }, { key: 'name', header: 'Name' },
                 { key: 'price_cents', header: 'Price (cents)' }, { key: 'cost_cents', header: 'Cost (cents)' },
                 { key: 'margin_pct', header: 'Margin %' }, { key: 'issue', header: 'Issue' },
               ],
-              outliers.data.rows,
+              outlierRows,
               'margin-outliers',
             )}>Export CSV</Button>
           )}
@@ -116,14 +175,21 @@ export function ProfitabilityReports({ filters, onFiltersChange }: Props) {
         <div className="mt-4">
           <DataTable
             columns={[
-              { key: 'issue', header: 'Issue', render: (r) => <Badge variant={ISSUE_VARIANT[r.issue] ?? 'default'}>{r.issue.replace(/_/g, ' ')}</Badge> },
+              {
+                key: 'issue',
+                header: 'Issue',
+                render: (r) => {
+                  const issue = typeof r.issue === 'string' && r.issue ? r.issue : 'UNKNOWN';
+                  return <Badge variant={ISSUE_VARIANT[issue] ?? 'default'}>{issue.replace(/_/g, ' ')}</Badge>;
+                },
+              },
               { key: 'sku', header: 'SKU', render: (r) => <span className="font-mono text-xs">{r.sku}</span> },
               { key: 'name', header: 'Product' },
               { key: 'price_cents', header: 'Price', render: (r) => <span className="tabular-nums">{formatMoney(r.price_cents)}</span> },
               { key: 'cost_cents', header: 'Cost', render: (r) => <span className="tabular-nums">{r.cost_cents != null ? formatMoney(r.cost_cents) : '-'}</span> },
               { key: 'margin_pct', header: 'Margin %', render: (r) => <span className="tabular-nums">{pctDisplay(r.margin_pct)}</span> },
             ]}
-            data={outliers.data?.rows ?? []}
+            data={outlierRows}
             emptyMessage="No margin outliers found."
           />
         </div>
@@ -137,7 +203,7 @@ export function ProfitabilityReports({ filters, onFiltersChange }: Props) {
             <MetricCard label="Lines Discounted" value={String(discounts.data.total_lines_discounted)} />
             <MetricCard label="Margin Erosion" value={formatMoney(discounts.data.margin_erosion_cents)} variant="danger" />
           </div>
-          {discounts.data.by_employee.length > 0 && (
+          {discountRows.length > 0 && (
             <Card padding={false}>
               <div className="p-5 pb-0">
                 <CardTitle>Discount Usage by Employee</CardTitle>
@@ -149,7 +215,7 @@ export function ProfitabilityReports({ filters, onFiltersChange }: Props) {
                     { key: 'discount_count', header: 'Discounts Given', render: (r) => <span className="tabular-nums">{r.discount_count}</span> },
                     { key: 'discount_total_cents', header: 'Total Discount', render: (r) => <span className="tabular-nums">{formatMoney(r.discount_total_cents)}</span> },
                   ]}
-                  data={discounts.data.by_employee}
+                  data={discountRows}
                   emptyMessage="No discount data."
                 />
               </div>

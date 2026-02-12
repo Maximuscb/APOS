@@ -34,6 +34,10 @@ function buildParams(filters: ReportFiltersState, extra?: Record<string, string>
   return { ...p, ...extra };
 }
 
+function safeMoney(value: unknown): string {
+  return formatMoney(typeof value === 'number' && Number.isFinite(value) ? value : 0);
+}
+
 export function SalesReports({ filters, onFiltersChange }: Props) {
   const [subTab, setSubTab] = useState('summary');
   const [timeMode, setTimeMode] = useState('hourly');
@@ -98,14 +102,14 @@ export function SalesReports({ filters, onFiltersChange }: Props) {
                   cx="50%"
                   cy="50%"
                   outerRadius={80}
-                  label={({ tender_type, total_cents }) => `${tender_type}: ${formatMoney(total_cents)}`}
+                  label={(entry: any) => `${entry?.tender_type ?? 'Unknown'}: ${safeMoney(entry?.total_cents)}`}
                 >
                   {summary.data.payment_breakdown.map((_, i) => (
                     <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                   ))}
                 </Pie>
                 <Legend />
-                <Tooltip formatter={(value: number) => formatMoney(value)} />
+                <Tooltip formatter={(value: unknown) => safeMoney(value)} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -150,8 +154,8 @@ export function SalesReports({ filters, onFiltersChange }: Props) {
                 <BarChart data={byTime.data.rows}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => formatMoney(v)} />
-                  <Tooltip formatter={(value: number) => formatMoney(value)} />
+                  <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => safeMoney(v)} />
+                  <Tooltip formatter={(value: unknown) => safeMoney(value)} />
                   <Bar dataKey="gross_sales_cents" fill="#3b82f6" name="Sales" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -284,8 +288,8 @@ function SalesTimeTrends({ params }: { params: Record<string, string> }) {
           <BarChart data={report.data.rows}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatMoney(v)} />
-            <Tooltip formatter={(value: number, name: string) => [formatMoney(value), name === 'gross_sales_cents' ? 'Sales' : name]} />
+            <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => safeMoney(v)} />
+            <Tooltip formatter={(value: unknown, name: string) => [safeMoney(value), name === 'gross_sales_cents' ? 'Sales' : name]} />
             <Bar dataKey="gross_sales_cents" fill="#3b82f6" name="Sales" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>

@@ -75,9 +75,11 @@ export function ReportsPage() {
   });
 
   // If active tab is not visible, switch to first visible
-  if (visibleTabs.length > 0 && !visibleTabs.find((t) => t.value === activeTab)) {
-    setActiveTab(visibleTabs[0].value);
-  }
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.find((t) => t.value === activeTab)) {
+      setActiveTab(visibleTabs[0].value);
+    }
+  }, [visibleTabs, activeTab]);
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto">

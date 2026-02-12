@@ -15,14 +15,14 @@ export function minutesToHours(minutes: number): string {
 
 export function exportToCsv(
   columns: { key: string; header: string }[],
-  data: Record<string, unknown>[],
+  data: Array<Record<string, unknown> | object>,
   filename: string,
 ) {
   const header = columns.map((c) => c.header).join(',');
   const rows = data.map((row) =>
     columns
       .map((c) => {
-        const val = row[c.key];
+        const val = (row as Record<string, unknown>)[c.key];
         if (val == null) return '';
         const str = String(val);
         // Escape values containing commas/quotes/newlines

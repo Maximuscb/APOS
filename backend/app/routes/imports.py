@@ -81,7 +81,7 @@ def upload_batch_route(batch_id: int):
         else:
             return jsonify({"error": "Unsupported file format"}), 400
 
-        result = import_service.stage_rows(batch_id=batch_id, rows=rows)
+        result = import_service.stage_rows(batch_id=batch_id, org_id=g.org_id, rows=rows)
         return jsonify(result), 201
     except ImportError as e:
         return jsonify({"error": str(e)}), 400
@@ -99,7 +99,7 @@ def stage_rows_route(batch_id: int):
         return jsonify({"error": "rows must be a list"}), 400
 
     try:
-        result = import_service.stage_rows(batch_id=batch_id, rows=rows)
+        result = import_service.stage_rows(batch_id=batch_id, org_id=g.org_id, rows=rows)
         return jsonify(result), 201
     except ImportError as e:
         return jsonify({"error": str(e)}), 400
@@ -110,7 +110,7 @@ def stage_rows_route(batch_id: int):
 @require_permission("CREATE_IMPORTS")
 def get_unmapped_route(batch_id: int):
     try:
-        result = import_service.get_unmapped_entities(batch_id)
+        result = import_service.get_unmapped_entities(batch_id=batch_id, org_id=g.org_id)
         return jsonify(result)
     except ImportError as e:
         return jsonify({"error": str(e)}), 400
@@ -131,6 +131,7 @@ def set_mapping_route(batch_id: int):
     try:
         mapping = import_service.set_entity_mapping(
             batch_id=batch_id,
+            org_id=g.org_id,
             entity_type=entity_type,
             foreign_id=str(foreign_id),
             local_entity_id=int(local_entity_id),
@@ -144,9 +145,14 @@ def set_mapping_route(batch_id: int):
 @require_auth
 @require_permission("APPROVE_IMPORTS")
 def post_rows_route(batch_id: int):
-    limit = request.args.get("limit", 500, type=int)
+    limit = request.args.get("limit", 200, type=int)
     try:
-        result = import_service.post_mapped_rows(batch_id=batch_id, limit=limit)
+        result = import_service.post_mapped_rows(
+            batch_id=batch_id,
+            org_id=g.org_id,
+            actor_user_id=g.current_user.id,
+            limit=limit,
+        )
         return jsonify(result)
     except ImportError as e:
         return jsonify({"error": str(e)}), 400
@@ -157,7 +163,27 @@ def post_rows_route(batch_id: int):
 @require_permission("CREATE_IMPORTS")
 def batch_status_route(batch_id: int):
     try:
-        result = import_service.get_batch_status(batch_id)
+        result = import_service.get_batch_status(batch_id=batch_id, org_id=g.org_id)
         return jsonify({"batch": result})
+    except ImportError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@imports_bp.get("/batches/<int:batch_id>/rows")
+@require_auth
+@require_permission("CREATE_IMPORTS")
+def batch_rows_route(batch_id: int):
+    status = request.args.get("status")
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 100, type=int)
+    try:
+        result = import_service.list_batch_rows(
+            batch_id=batch_id,
+            org_id=g.org_id,
+            status=status,
+            page=page,
+            per_page=per_page,
+        )
+        return jsonify(result), 200
     except ImportError as e:
         return jsonify({"error": str(e)}), 400

@@ -26,6 +26,10 @@ function buildParams(filters: ReportFiltersState) {
   return p;
 }
 
+function safeMoney(value: unknown): string {
+  return formatMoney(typeof value === 'number' && Number.isFinite(value) ? value : 0);
+}
+
 export function CashRegisterReports({ filters, onFiltersChange }: Props) {
   const params = useMemo(() => buildParams(filters), [filters]);
 
@@ -79,13 +83,13 @@ export function CashRegisterReports({ filters, onFiltersChange }: Props) {
                     cx="50%"
                     cy="50%"
                     outerRadius={70}
-                    label={({ tender_type }) => tender_type}
+                    label={(entry: any) => entry?.tender_type ?? 'Unknown'}
                   >
                     {payments.data.rows.map((_, i) => (
                       <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => formatMoney(value)} />
+                  <Tooltip formatter={(value: unknown) => safeMoney(value)} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>

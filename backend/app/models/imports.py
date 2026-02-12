@@ -125,6 +125,7 @@ class ImportStagingRow(db.Model):
 
     # Raw data as JSON string
     raw_data = db.Column(db.Text, nullable=False)
+    normalized_data = db.Column(db.JSON, nullable=True)
 
     # Original ID from source system (preserved for traceability)
     foreign_id = db.Column(db.String(128), nullable=True, index=True)
@@ -157,6 +158,7 @@ class ImportStagingRow(db.Model):
             "batch_id": self.batch_id,
             "row_number": self.row_number,
             "raw_data": self.raw_data,
+            "normalized_data": self.normalized_data,
             "foreign_id": self.foreign_id,
             "mapping_status": self.mapping_status,
             "posting_status": self.posting_status,

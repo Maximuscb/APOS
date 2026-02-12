@@ -22,6 +22,10 @@ function buildParams(filters: ReportFiltersState) {
   return p;
 }
 
+function safeMoney(value: unknown): string {
+  return formatMoney(typeof value === 'number' && Number.isFinite(value) ? value : 0);
+}
+
 export function VendorReports({ filters, onFiltersChange }: Props) {
   const params = useMemo(() => buildParams(filters), [filters]);
 
@@ -95,9 +99,9 @@ export function VendorReports({ filters, onFiltersChange }: Props) {
               <LineChart data={costChanges.data.rows}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="occurred_at" tick={{ fontSize: 11 }} tickFormatter={(v) => new Date(v).toLocaleDateString()} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => formatMoney(v)} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => safeMoney(v)} />
                 <Tooltip
-                  formatter={(value: number) => formatMoney(value)}
+                  formatter={(value: unknown) => safeMoney(value)}
                   labelFormatter={(label) => new Date(label).toLocaleDateString()}
                 />
                 <Line type="monotone" dataKey="unit_cost_cents" stroke="#3b82f6" name="Unit Cost" dot={{ r: 3 }} />

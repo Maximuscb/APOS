@@ -15,7 +15,6 @@ const ReportsPage = lazy(() => import('@/routes/operations/ReportsPage').then((m
 const AnalyticsPage = lazy(() => import('@/routes/operations/AnalyticsPage'));
 const ServicesPage = lazy(() => import('@/routes/operations/ServicesPage'));
 const TimekeepingPage = lazy(() => import('@/routes/operations/TimekeepingPage'));
-const AuditsPage = lazy(() => import('@/routes/operations/AuditsPage'));
 const UsersPage = lazy(() => import('@/routes/operations/UsersPage'));
 const SettingsPage = lazy(() => import('@/routes/operations/SettingsPage'));
 const VendorsPage = lazy(() => import('@/routes/operations/VendorsPage'));
@@ -73,7 +72,6 @@ export default function App() {
                 <Route path="analytics" element={<Suspense fallback={<Loading />}><AnalyticsPage /></Suspense>} />
                 <Route path="services" element={<Suspense fallback={<Loading />}><ServicesPage /></Suspense>} />
                 <Route path="timekeeping" element={<Suspense fallback={<Loading />}><TimekeepingPage /></Suspense>} />
-                <Route path="events" element={<Suspense fallback={<Loading />}><AuditsPage /></Suspense>} />
                 <Route path="users" element={<Suspense fallback={<Loading />}><UsersPage /></Suspense>} />
                 <Route path="vendors" element={<Suspense fallback={<Loading />}><VendorsPage /></Suspense>} />
                 <Route path="communications" element={<Suspense fallback={<Loading />}><CommunicationsPage /></Suspense>} />
@@ -84,7 +82,8 @@ export default function App() {
                 <Route path="registers" element={<Navigate to="/operations/devices" replace />} />
                 <Route path="overrides" element={<Navigate to="/operations/users" replace />} />
                 <Route path="imports" element={<Navigate to="/operations/services" replace />} />
-                <Route path="audits" element={<Navigate to="/operations/events" replace />} />
+                <Route path="audits" element={<Navigate to="/operations/reports" replace />} />
+                <Route path="events" element={<Navigate to="/operations/reports" replace />} />
               </Route>
 
               <Route path="*" element={<Navigate to="/operations/dashboard" replace />} />

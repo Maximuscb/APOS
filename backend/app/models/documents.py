@@ -473,6 +473,12 @@ class MasterLedgerEvent(db.Model):
     __table_args__ = (
         db.Index("ix_master_ledger_org_ledger_occurred", "org_ledger_id", "occurred_at"),
         db.Index("ix_master_ledger_store_occurred", "store_id", "occurred_at"),
+        db.UniqueConstraint(
+            "org_ledger_id",
+            "import_batch_id",
+            "source_row_number",
+            name="uq_master_ledger_import_row",
+        ),
         {"sqlite_autoincrement": True},
     )
 
@@ -504,6 +510,10 @@ class MasterLedgerEvent(db.Model):
     transfer_id = db.Column(db.Integer, db.ForeignKey("transfers.id"), nullable=True, index=True)
     count_id = db.Column(db.Integer, db.ForeignKey("counts.id"), nullable=True, index=True)
     cash_drawer_event_id = db.Column(db.Integer, db.ForeignKey("cash_drawer_events.id"), nullable=True, index=True)
+    import_batch_id = db.Column(db.Integer, db.ForeignKey("import_batches.id"), nullable=True, index=True)
+    source = db.Column(db.String(16), nullable=True, index=True)  # APP | IMPORT | API | MIGRATION
+    source_row_number = db.Column(db.Integer, nullable=True, index=True)
+    source_foreign_id = db.Column(db.String(128), nullable=True, index=True)
 
     # Business vs system time (same timestamp policy as inventory)
     occurred_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), index=True)
@@ -537,6 +547,10 @@ class MasterLedgerEvent(db.Model):
             "transfer_id": self.transfer_id,
             "count_id": self.count_id,
             "cash_drawer_event_id": self.cash_drawer_event_id,
+            "import_batch_id": self.import_batch_id,
+            "source": self.source,
+            "source_row_number": self.source_row_number,
+            "source_foreign_id": self.source_foreign_id,
             "occurred_at": to_utc_z(self.occurred_at),
             "created_at": to_utc_z(self.created_at),
             "note": self.note,

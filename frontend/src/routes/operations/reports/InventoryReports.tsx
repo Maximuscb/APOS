@@ -168,7 +168,7 @@ export function InventoryReports({ filters, onFiltersChange }: Props) {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis type="number" tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="type" tick={{ fontSize: 11 }} width={80} />
-                <Tooltip formatter={(value: number) => Math.abs(value)} />
+                <Tooltip formatter={(value: unknown) => Math.abs(typeof value === 'number' ? value : 0)} />
                 <Bar dataKey="total_units" fill="#3b82f6" name="Units" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
