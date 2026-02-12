@@ -11,9 +11,8 @@ type Sale = { id: number; document_number: string; status: string; store_id: num
 type SaleLine = { id: number; product_id: number; quantity: number; unit_price_cents: number; line_total_cents: number };
 type TaskRow = { id: number; document_type: string; document_number: string; status: string };
 type CommTask = { id: number; title: string; description: string | null; status: string; task_type: string };
+type ActiveNotification = { kind: 'ANNOUNCEMENT' | 'REMINDER'; id: number; title: string; body: string; priority: string; is_active: boolean };
 type QuickScreen = { id: string; name: string; product_ids: number[] };
-type Announcement = { id: number; title: string; body: string; priority: string; is_active: boolean };
-type Reminder = { id: number; title: string; body: string; is_active: boolean; repeat_type: string };
 type Payment = { id: number; tender_type: string; amount_cents: number; change_cents: number; status: string };
 type PaymentSummary = {
   total_due_cents: number | null;
@@ -62,8 +61,7 @@ export function SalesWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [commTasks, setCommTasks] = useState<CommTask[]>([]);
-  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
-  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [notifications, setNotifications] = useState<ActiveNotification[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
 
   const [paymentSummary, setPaymentSummary] = useState<PaymentSummary | null>(null);
@@ -171,10 +169,13 @@ export function SalesWorkspace({
   }, [currentSale, busy]);
 
   useEffect(() => {
-    if (currentSale) {
+    if (currentSale && currentSale.status === 'POSTED') {
       loadPaymentSummary(currentSale.id);
+    } else {
+      setPaymentSummary(null);
+      resetPaymentInputs();
     }
-  }, [currentSale?.id]);
+  }, [currentSale?.id, currentSale?.status]);
 
   async function addProduct(productId: number) {
     if (!currentSale) return;
@@ -204,7 +205,8 @@ export function SalesWorkspace({
     setBusy(true);
     setError(null);
     try {
-      await api.post(`/api/sales/${currentSale.id}/post`, {});
+      const postRes = await api.post<{ sale: Sale }>(`/api/sales/${currentSale.id}/post`, {});
+      setCurrentSale(postRes.sale);
       await loadSale();
       await loadPaymentSummary(currentSale.id);
     } catch (e: any) {
@@ -248,18 +250,16 @@ export function SalesWorkspace({
     try {
       const [docRes, commRes, activeRes] = await Promise.all([
         api.get<{ documents?: TaskRow[] }>(`/api/documents?store_id=${storeId}&status=APPROVED`),
-        api.get<CommTask[]>(`/api/communications/tasks?store_id=${storeId}`).catch(() => [] as CommTask[]),
-        api.get<{ announcements?: Announcement[]; reminders?: Reminder[] }>(`/api/communications/active?store_id=${storeId}`).catch(() => ({ announcements: [], reminders: [] })),
+        api.get<CommTask[]>(`/api/communications/tasks?store_id=${storeId}&mine=true&assigned_to_register_id=${registerId ?? ''}`).catch(() => [] as CommTask[]),
+        api.get<{ notifications?: ActiveNotification[] }>(`/api/communications/active?store_id=${storeId}`).catch(() => ({ notifications: [] })),
       ]);
       setTasks((docRes.documents ?? []).slice(0, 10));
       setCommTasks(commRes.filter((t) => t.status === 'PENDING'));
-      setAnnouncements((activeRes.announcements ?? []).filter((a) => a.is_active).slice(0, 5));
-      setReminders((activeRes.reminders ?? []).filter((r) => r.is_active).slice(0, 5));
+      setNotifications((activeRes.notifications ?? []).filter((n) => n.is_active).slice(0, 5));
     } catch {
       setTasks([]);
       setCommTasks([]);
-      setAnnouncements([]);
-      setReminders([]);
+      setNotifications([]);
     } finally {
       setTasksLoading(false);
     }
@@ -273,18 +273,20 @@ export function SalesWorkspace({
   }
 
   async function deferCommTask(taskId: number) {
+    const deferredReason = window.prompt('Optional defer reason') ?? undefined;
     try {
-      await api.patch(`/api/communications/tasks/${taskId}`, { status: 'DEFERRED' });
+      await api.patch(`/api/communications/tasks/${taskId}`, { status: 'DEFERRED', deferred_reason: deferredReason });
       loadTasks();
     } catch { /* silent */ }
   }
 
   useEffect(() => {
     loadTasks();
-  }, [storeId, userId]);
+  }, [storeId, userId, registerId]);
 
   const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0);
   const totalCents = lines.reduce((sum, l) => sum + l.line_total_cents, 0);
+  const isReadyForPayment = currentSale?.status === 'POSTED';
   const remainingCents = paymentSummary?.remaining_cents ?? totalCents;
   const isPaid = paymentSummary?.remaining_cents !== null && paymentSummary?.remaining_cents !== undefined && paymentSummary.remaining_cents <= 0;
 
@@ -394,7 +396,7 @@ export function SalesWorkspace({
               </div>
               <div className="mt-3 space-y-1 text-sm"><div className="flex justify-between"><span className="text-muted">Items</span><span>{itemCount}</span></div><div className="flex justify-between text-lg font-semibold"><span>Total</span><span>{formatMoney(totalCents)}</span></div></div>
               <div className="mt-3 grid grid-cols-2 gap-2">
-                <Button onClick={postSale} disabled={busy || !currentSale || lines.length === 0}>Post Sale</Button>
+                <Button onClick={postSale} disabled={busy || !currentSale || lines.length === 0 || isReadyForPayment}>Proceed to Payment</Button>
                 <Button variant="secondary" onClick={createNewSale} disabled={busy}>New Sale</Button>
               </div>
             </Card>
@@ -409,8 +411,13 @@ export function SalesWorkspace({
                 <div className="flex justify-between"><span className="text-muted">Paid</span><span>{formatMoney(paymentSummary?.total_paid_cents ?? 0)}</span></div>
                 <div className="flex justify-between font-semibold"><span>Remaining</span><span>{formatMoney(remainingCents)}</span></div>
               </div>
+              {!isReadyForPayment && (
+                <div className="mt-3 p-3 rounded-xl border border-border bg-slate-50 text-sm text-slate-600">
+                  Click <span className="font-medium">Proceed to Payment</span> to unlock payment.
+                </div>
+              )}
               <div className="mt-3 grid grid-cols-1 gap-2">
-                <select value={paymentTender} onChange={(e) => setPaymentTender(e.target.value as TenderType)} className="h-10 px-2 rounded-xl border border-border bg-white text-sm">
+                <select value={paymentTender} onChange={(e) => setPaymentTender(e.target.value as TenderType)} className="h-10 px-2 rounded-xl border border-border bg-white text-sm" disabled={!isReadyForPayment}>
                   {tenderOptions.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <input
@@ -418,6 +425,7 @@ export function SalesWorkspace({
                   onChange={(e) => setPaymentAmount(e.target.value)}
                   placeholder="Amount (USD)"
                   className="h-10 px-3 rounded-xl border border-border text-sm"
+                  disabled={!isReadyForPayment}
                 />
                 {paymentTender !== 'CASH' && (
                   <input
@@ -425,11 +433,12 @@ export function SalesWorkspace({
                     onChange={(e) => setPaymentRef(e.target.value)}
                     placeholder="Reference # (optional)"
                     className="h-10 px-3 rounded-xl border border-border text-sm"
+                    disabled={!isReadyForPayment}
                   />
                 )}
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
-                <Button onClick={applyPayment} disabled={paymentBusy || !currentSale || lines.length === 0}>
+                <Button onClick={applyPayment} disabled={paymentBusy || !currentSale || lines.length === 0 || !isReadyForPayment}>
                   {paymentBusy ? 'Processing...' : 'Take Payment'}
                 </Button>
                 <Button variant="secondary" onClick={async () => { setCurrentSale(null); setLines([]); }} disabled={!isPaid}>
@@ -453,27 +462,14 @@ export function SalesWorkspace({
               <div className="mt-3 min-h-0 overflow-auto space-y-3">
                 {tasksLoading ? <p className="text-sm text-muted">Loading tasks...</p> : (
                   <>
-                    {announcements.length > 0 && (
+                    {notifications.length > 0 && (
                       <div>
-                        <p className="text-xs text-muted font-medium uppercase tracking-wider mb-1">Announcements</p>
+                        <p className="text-xs text-muted font-medium uppercase tracking-wider mb-1">Notifications</p>
                         <div className="space-y-2">
-                          {announcements.map((a) => (
-                            <div key={a.id} className="p-2 rounded-lg border border-border">
-                              <p className="text-sm font-medium text-slate-900">{a.title}</p>
-                              <p className="text-xs text-muted mt-0.5 line-clamp-1">{a.body}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {reminders.length > 0 && (
-                      <div>
-                        <p className="text-xs text-muted font-medium uppercase tracking-wider mb-1">Reminders</p>
-                        <div className="space-y-2">
-                          {reminders.map((r) => (
-                            <div key={r.id} className="p-2 rounded-lg border border-border">
-                              <p className="text-sm font-medium text-slate-900">{r.title}</p>
-                              <p className="text-xs text-muted mt-0.5 line-clamp-1">{r.body}</p>
+                          {notifications.map((n) => (
+                            <div key={`${n.kind}-${n.id}`} className="p-2 rounded-lg border border-border">
+                              <p className="text-sm font-medium text-slate-900">{n.title}</p>
+                              <p className="text-xs text-muted mt-0.5 line-clamp-1">{n.body}</p>
                             </div>
                           ))}
                         </div>
@@ -506,7 +502,7 @@ export function SalesWorkspace({
                         </tbody></table>
                       </div>
                     )}
-                    {tasks.length === 0 && commTasks.length === 0 && announcements.length === 0 && reminders.length === 0 && (
+                    {tasks.length === 0 && commTasks.length === 0 && notifications.length === 0 && (
                       <p className="text-sm text-muted">No pending tasks.</p>
                     )}
                   </>

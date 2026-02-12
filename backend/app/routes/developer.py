@@ -7,6 +7,7 @@ from ..extensions import db
 from ..decorators import require_auth, require_developer
 from ..models import Organization, SessionToken, Store
 from ..services import session_service
+from ..services.ledger_service import ensure_org_master_ledger
 
 developer_bp = Blueprint("developer", __name__, url_prefix="/api/developer")
 
@@ -46,6 +47,8 @@ def create_organization():
         created_store = Store(org_id=org.id, name=initial_store_name)
         db.session.add(created_store)
 
+    ensure_org_master_ledger(org.id)
+
     db.session.commit()
 
     return jsonify({
@@ -74,9 +77,6 @@ def switch_org():
     if not org:
         return jsonify({"error": "Organization not found or inactive"}), 404
 
-    # Pick the first store in the target org (if any) as default
-    store = db.session.query(Store).filter_by(org_id=org_id).first()
-
     # Revoke the current session
     current_session = g.session_context.session
     current_session.is_revoked = True
@@ -92,7 +92,7 @@ def switch_org():
     new_session = SessionToken(
         user_id=user.id,
         org_id=org_id,
-        store_id=store.id if store else None,
+        store_id=None,
         token_hash=token_hash,
         created_at=now,
         last_used_at=now,
@@ -108,8 +108,8 @@ def switch_org():
         "token": plaintext_token,
         "org_id": org_id,
         "org_name": org.name,
-        "store_id": store.id if store else None,
-        "store_name": store.name if store else None,
+        "store_id": None,
+        "store_name": None,
     })
 
 

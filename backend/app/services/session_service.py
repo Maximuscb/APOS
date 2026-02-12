@@ -110,10 +110,19 @@ def create_session(
     now = utcnow()
     expires_at = now + SESSION_ABSOLUTE_TIMEOUT
 
+    session_org_id = user.org_id
+    session_store_id = user.store_id
+
+    # Developers are global operators and must not be implicitly org/store bound.
+    # They can choose org context explicitly via developer switch-org flow.
+    if user.is_developer:
+        session_org_id = None
+        session_store_id = None
+
     session = SessionToken(
         user_id=user_id,
-        org_id=user.org_id,  # MULTI-TENANT: Capture tenant context
-        store_id=user.store_id,  # May be None for org-level users
+        org_id=session_org_id,  # MULTI-TENANT: Capture tenant context
+        store_id=session_store_id,  # May be None for org-level users
         token_hash=token_hash,
         created_at=now,
         last_used_at=now,
@@ -184,13 +193,14 @@ def validate_session(token: str) -> SessionContext | None:
         return None
 
     # MULTI-TENANT: Check if organization is still active
-    org = session.organization
-    if not org or not org.is_active:
-        session.is_revoked = True
-        session.revoked_at = now
-        session.revoked_reason = "Organization deactivated"
-        db.session.commit()
-        return None
+    if session.org_id is not None:
+        org = session.organization
+        if not org or not org.is_active:
+            session.is_revoked = True
+            session.revoked_at = now
+            session.revoked_reason = "Organization deactivated"
+            db.session.commit()
+            return None
 
     # Valid session - update activity timestamp
     session.last_used_at = now

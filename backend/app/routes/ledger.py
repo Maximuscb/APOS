@@ -3,7 +3,7 @@
 from flask import Blueprint, request, jsonify, g, current_app
 from sqlalchemy import or_, and_
 
-from ..models import MasterLedgerEvent
+from ..models import MasterLedgerEvent, OrganizationMasterLedger
 from app.time_utils import parse_iso_datetime, to_utc_z
 from ..decorators import require_auth, require_permission
 from ..services import permission_service
@@ -24,14 +24,17 @@ def list_ledger_events_route():
     def _is_admin() -> bool:
         return permission_service.user_has_permission(g.current_user.id, "SYSTEM_ADMIN")
 
+    def _is_global_operator() -> bool:
+        return bool(getattr(g.current_user, "is_developer", False)) or _is_admin()
+
     store_id = request.args.get("store_id", type=int)
 
-    if not _is_admin():
-        if g.current_user.store_id is None:
+    if not _is_global_operator():
+        if g.store_id is None:
             return jsonify({"error": "Store assignment required"}), 403
-        if store_id is not None and store_id != g.current_user.store_id:
+        if store_id is not None and store_id != g.store_id:
             return jsonify({"error": "Store access denied"}), 403
-        store_id = g.current_user.store_id
+        store_id = g.store_id
 
     limit = request.args.get("limit", default=100, type=int)
     limit = max(1, min(limit, 500))
@@ -63,6 +66,13 @@ def list_ledger_events_route():
             return jsonify({"error": "cursor must be in format <ISO-8601>|<id>"}), 400
 
     q = MasterLedgerEvent.query
+    if g.org_id is not None:
+        org_ledger = OrganizationMasterLedger.query.filter_by(org_id=g.org_id).first()
+        if org_ledger:
+            q = q.filter(MasterLedgerEvent.org_ledger_id == org_ledger.id)
+        else:
+            return jsonify({"items": [], "next_cursor": None, "limit": limit}), 200
+
     if store_id is not None:
         q = q.filter(MasterLedgerEvent.store_id == store_id)
 

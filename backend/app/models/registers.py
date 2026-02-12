@@ -21,6 +21,7 @@ class Register(db.Model):
     )
 
     id = db.Column(db.Integer, primary_key=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
     store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
 
     # Human-readable identifier (e.g., "REG-01", "FRONT", "DRIVE-THRU")
@@ -28,26 +29,24 @@ class Register(db.Model):
     name = db.Column(db.String(128), nullable=False)  # Display name
     location = db.Column(db.String(128), nullable=True)  # Physical location in store
 
-    # Device identification
-    device_id = db.Column(db.String(128), nullable=True)  # MAC address, serial, etc.
-
     is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
     version_id = db.Column(db.Integer, nullable=False, default=1)
 
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
 
+    organization = db.relationship("Organization", backref=db.backref("registers", lazy=True))
     store = db.relationship("Store", backref=db.backref("registers", lazy=True))
     __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "org_id": self.org_id,
             "store_id": self.store_id,
             "register_number": self.register_number,
             "name": self.name,
             "location": self.location,
-            "device_id": self.device_id,
             "is_active": self.is_active,
             "version_id": self.version_id,
             "created_at": to_utc_z(self.created_at),
@@ -172,4 +171,115 @@ class CashDrawerEvent(db.Model):
             "approved_by_user_id": self.approved_by_user_id,
             "reason": self.reason,
             "occurred_at": to_utc_z(self.occurred_at),
+        }
+
+
+class CashDrawer(db.Model):
+    """
+    Physical cash drawer attached to a register.
+
+    WHY: Registers may have different drawer configurations (single vs dual,
+    different capacities). Modeling the drawer separately allows tracking
+    hardware state and connection config independently from session logic.
+
+    DESIGN: One drawer per register (enforced by unique constraint).
+    Drawers persist across sessions and are not deleted when inactive.
+    """
+    __tablename__ = "cash_drawers"
+    __table_args__ = (
+        db.UniqueConstraint("register_id", name="uq_cash_drawers_register"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=False, index=True)
+
+    # Hardware identification
+    model = db.Column(db.String(128), nullable=True)  # e.g., "APG VB320-BL1616"
+    serial_number = db.Column(db.String(128), nullable=True)
+
+    # Connection info
+    connection_type = db.Column(db.String(32), nullable=True)  # USB, SERIAL, NETWORK, PRINTER_DRIVEN
+    connection_address = db.Column(db.String(255), nullable=True)  # COM port, IP, or null if printer-driven
+
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
+
+    register = db.relationship("Register", backref=db.backref("cash_drawer", uselist=False, lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "register_id": self.register_id,
+            "model": self.model,
+            "serial_number": self.serial_number,
+            "connection_type": self.connection_type,
+            "connection_address": self.connection_address,
+            "is_active": self.is_active,
+            "created_at": to_utc_z(self.created_at),
+            "updated_at": to_utc_z(self.updated_at),
+        }
+
+
+class Printer(db.Model):
+    """
+    Receipt/label printer attached to a register.
+
+    WHY: Registers need printers for receipts, kitchen tickets, labels, etc.
+    A register may have multiple printers (e.g., receipt + kitchen), each
+    with its own connection and capability configuration.
+
+    PRINTER TYPES:
+    - RECEIPT: Customer-facing receipt printer
+    - KITCHEN: Kitchen/prep area ticket printer
+    - LABEL: Barcode/price label printer
+    - REPORT: Back-office report printer
+    """
+    __tablename__ = "printers"
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+    register_id = db.Column(db.Integer, db.ForeignKey("registers.id"), nullable=False, index=True)
+
+    name = db.Column(db.String(128), nullable=False)  # e.g., "Front Receipt Printer"
+    printer_type = db.Column(db.String(32), nullable=False, index=True)  # RECEIPT, KITCHEN, LABEL, REPORT
+
+    # Hardware identification
+    model = db.Column(db.String(128), nullable=True)  # e.g., "Epson TM-T88VI"
+    serial_number = db.Column(db.String(128), nullable=True)
+
+    # Connection info
+    connection_type = db.Column(db.String(32), nullable=True)  # USB, SERIAL, NETWORK, BLUETOOTH
+    connection_address = db.Column(db.String(255), nullable=True)  # IP:port, COM port, BT address
+
+    # Capabilities
+    paper_width_mm = db.Column(db.Integer, nullable=True)  # 58, 80, etc.
+    supports_cut = db.Column(db.Boolean, nullable=False, default=True)
+    supports_cash_drawer = db.Column(db.Boolean, nullable=False, default=False)  # Can kick a connected drawer
+
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), onupdate=db.func.now())
+
+    register = db.relationship("Register", backref=db.backref("printers", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "register_id": self.register_id,
+            "name": self.name,
+            "printer_type": self.printer_type,
+            "model": self.model,
+            "serial_number": self.serial_number,
+            "connection_type": self.connection_type,
+            "connection_address": self.connection_address,
+            "paper_width_mm": self.paper_width_mm,
+            "supports_cut": self.supports_cut,
+            "supports_cash_drawer": self.supports_cash_drawer,
+            "is_active": self.is_active,
+            "created_at": to_utc_z(self.created_at),
+            "updated_at": to_utc_z(self.updated_at),
         }

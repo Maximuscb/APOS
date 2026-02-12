@@ -39,6 +39,14 @@ type Override = {
   is_active: boolean;
 };
 
+type ManagerStoreAccess = {
+  id: number;
+  user_id: number;
+  store_id: number;
+  granted_by_user_id: number | null;
+  granted_at: string;
+};
+
 /* ------------------------------------------------------------------ */
 /*  Permission workspace grouping                                      */
 /* ------------------------------------------------------------------ */
@@ -111,8 +119,8 @@ function groupPermissions(permissions: Permission[]) {
 
 export default function UsersPage() {
   const { currentStoreId: storeId, stores } = useStore();
-  const { hasRole } = useAuth();
-  const isAdmin = hasRole('admin');
+  const { hasPermission } = useAuth();
+  const canScopeAcrossStores = hasPermission('MANAGE_STORES') && stores.length > 1;
 
   // Users list
   const [users, setUsers] = useState<User[]>([]);
@@ -141,6 +149,9 @@ export default function UsersPage() {
   const [overridePerm, setOverridePerm] = useState('');
   const [overrideType, setOverrideType] = useState<'GRANT' | 'DENY'>('GRANT');
   const [permWorkspace, setPermWorkspace] = useState('sales');
+  const [managerStoreAccess, setManagerStoreAccess] = useState<ManagerStoreAccess[]>([]);
+  const [effectiveManagerStoreIds, setEffectiveManagerStoreIds] = useState<number[]>([]);
+  const [newManagerStoreId, setNewManagerStoreId] = useState<number | null>(null);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -222,6 +233,14 @@ export default function UsersPage() {
       setAssignRole('');
       const o = await api.get<{ overrides: Override[] }>(`/api/admin/users/${userId}/permission-overrides`);
       setOverrides(o.overrides ?? []);
+      const ms = await api.get<{
+        items: ManagerStoreAccess[];
+        effective_store_ids: number[];
+        primary_store_id: number | null;
+      }>(`/api/admin/users/${userId}/manager-stores`);
+      setManagerStoreAccess(ms.items ?? []);
+      setEffectiveManagerStoreIds(ms.effective_store_ids ?? []);
+      setNewManagerStoreId(null);
     } catch (err: any) {
       setError(err?.detail ?? err?.message ?? 'Failed to load user details.');
     } finally {
@@ -330,6 +349,40 @@ export default function UsersPage() {
     }
   }
 
+  async function addManagerStoreAccess() {
+    if (!selectedUser || !newManagerStoreId) return;
+    setActionBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      await api.post(`/api/admin/users/${selectedUser.id}/manager-stores`, {
+        store_id: newManagerStoreId,
+      });
+      await openDetails(selectedUser.id);
+      setSuccess('Manager store access granted.');
+    } catch (err: any) {
+      setError(err?.detail ?? err?.message ?? 'Failed to grant manager store access.');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  async function removeManagerStoreAccess(storeIdToRemove: number) {
+    if (!selectedUser) return;
+    setActionBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      await api.delete(`/api/admin/users/${selectedUser.id}/manager-stores/${storeIdToRemove}`);
+      await openDetails(selectedUser.id);
+      setSuccess('Manager store access removed.');
+    } catch (err: any) {
+      setError(err?.detail ?? err?.message ?? 'Failed to remove manager store access.');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
   // Group user permissions by workspace for display
   const userPermsByWorkspace = selectedUser?.permissions
     ? groupPermissions(
@@ -348,6 +401,10 @@ export default function UsersPage() {
   for (const s of stores) {
     storeNameMap[s.id] = s.name;
   }
+  const explicitManagerStoreIds = new Set(managerStoreAccess.map((a) => a.store_id));
+  const addableManagerStores = stores.filter(
+    (s) => !effectiveManagerStoreIds.includes(s.id),
+  );
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl mx-auto">
@@ -416,7 +473,7 @@ export default function UsersPage() {
           <CardTitle>Users</CardTitle>
           <div className="flex items-center gap-4 flex-wrap">
             {/* Admin store filter */}
-            {isAdmin && stores.length > 1 && (
+            {canScopeAcrossStores && (
               <div className="flex items-center gap-2">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -580,6 +637,59 @@ export default function UsersPage() {
               </div>
             </div>
 
+            {/* Managerial Store Access */}
+            <div>
+              <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Managerial Store Access</p>
+              <div className="flex flex-wrap gap-2">
+                {effectiveManagerStoreIds.length === 0 ? (
+                  <p className="text-sm text-muted">No managerial store access assigned.</p>
+                ) : (
+                  effectiveManagerStoreIds.map((sid) => {
+                    const isPrimary = selectedUser.store_id === sid;
+                    const isExplicit = explicitManagerStoreIds.has(sid);
+                    return (
+                      <div key={sid} className="flex items-center gap-1">
+                        <Badge variant={isPrimary ? 'primary' : 'muted'}>
+                          {storeNameMap[sid] ?? `#${sid}`}{isPrimary ? ' (Primary)' : ''}
+                        </Badge>
+                        {!isPrimary && isExplicit && (
+                          <button
+                            onClick={() => removeManagerStoreAccess(sid)}
+                            disabled={actionBusy}
+                            className="text-red-400 hover:text-red-600 text-xs font-bold px-1 cursor-pointer"
+                            title="Revoke store access"
+                          >
+                            x
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              <div className="flex gap-2 mt-3">
+                <Select
+                  label=""
+                  value={newManagerStoreId ? String(newManagerStoreId) : ''}
+                  onChange={(e) => setNewManagerStoreId(e.target.value ? Number(e.target.value) : null)}
+                  options={[
+                    { value: '', label: '-- Grant Store Access --' },
+                    ...addableManagerStores.map((s) => ({ value: String(s.id), label: s.name })),
+                  ]}
+                />
+                <div className="flex items-end">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={addManagerStoreAccess}
+                    disabled={!newManagerStoreId || actionBusy}
+                  >
+                    Grant
+                  </Button>
+                </div>
+              </div>
+            </div>
+
             {/* Roles */}
             <div>
               <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Roles</p>
@@ -678,7 +788,7 @@ export default function UsersPage() {
                   options={[
                     { value: '', label: '-- Permission --' },
                     ...Object.entries(catalogByWorkspace).flatMap(([ws, cats]) =>
-                      Object.entries(cats).flatMap(([cat, perms]) =>
+                      Object.entries(cats).flatMap(([, perms]) =>
                         perms.map((p) => ({
                           value: p.code,
                           label: `${WORKSPACE_GROUPS[ws].label} / ${p.name ?? p.code}`,

@@ -27,17 +27,19 @@ type DocumentRow = {
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-const DOC_TYPES = [
+const REPORT_TYPES = [
   { value: '', label: 'All Types' },
-  { value: 'SALE', label: 'Sales' },
-  { value: 'RECEIVE', label: 'Receives' },
-  { value: 'ADJUSTMENT', label: 'Adjustments' },
-  { value: 'COUNT', label: 'Counts' },
-  { value: 'TRANSFER', label: 'Transfers' },
-  { value: 'RETURN', label: 'Returns' },
-  { value: 'PAYMENT', label: 'Payments' },
-  { value: 'SHIFT', label: 'Shifts' },
-  { value: 'IMPORT', label: 'Imports' },
+  { value: 'SALES', label: 'Sales' },
+  { value: 'RECEIVES', label: 'Receives' },
+  { value: 'ADJUSTMENTS', label: 'Adjustments' },
+  { value: 'COUNTS', label: 'Counts' },
+  { value: 'TRANSFERS', label: 'Transfers' },
+  { value: 'RETURNS', label: 'Returns' },
+  { value: 'PAYMENTS', label: 'Payments' },
+  { value: 'SHIFTS', label: 'Shifts' },
+  { value: 'IMPORTS', label: 'Imports' },
+  { value: 'DEVICES', label: 'Devices' },
+  { value: 'EVENTS', label: 'Events' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -63,10 +65,11 @@ function statusVariant(status: string | null): 'default' | 'primary' | 'success'
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function DocumentsPage() {
-  const { currentStoreId: storeId } = useStore();
+export default function ReportsPage() {
+  const { stores } = useStore();
 
   const [docType, setDocType] = useState('');
+  const [filterStoreId, setFilterStoreId] = useState('');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
@@ -77,7 +80,8 @@ export default function DocumentsPage() {
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams({ store_id: String(storeId) });
+      const params = new URLSearchParams();
+      if (filterStoreId) params.set('store_id', filterStoreId);
       if (docType) params.set('type', docType);
       if (fromDate) {
         const d = new Date(fromDate);
@@ -96,7 +100,7 @@ export default function DocumentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [storeId, docType, fromDate, toDate]);
+  }, [filterStoreId, docType, fromDate, toDate]);
 
   useEffect(() => {
     loadDocuments();
@@ -105,9 +109,9 @@ export default function DocumentsPage() {
   return (
     <div className="flex flex-col gap-6 max-w-6xl mx-auto">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Documents</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Reports</h1>
         <p className="text-sm text-muted mt-1">
-          Browse and filter transaction documents for your store.
+          Browse and filter operational reports across your managed stores.
         </p>
       </div>
 
@@ -120,10 +124,19 @@ export default function DocumentsPage() {
         <CardTitle>Filters</CardTitle>
         <div className="flex flex-wrap gap-4 items-end mt-4">
           <Select
-            label="Document Type"
+            label="Store"
+            value={filterStoreId}
+            onChange={(e) => setFilterStoreId(e.target.value)}
+            options={[
+              { value: '', label: 'All Managed Stores' },
+              ...stores.map((s) => ({ value: String(s.id), label: s.name })),
+            ]}
+          />
+          <Select
+            label="Report Type"
             value={docType}
             onChange={(e) => setDocType(e.target.value)}
-            options={DOC_TYPES}
+            options={REPORT_TYPES}
           />
           <Input
             label="From Date"
@@ -143,12 +156,12 @@ export default function DocumentsPage() {
         </div>
       </Card>
 
-      {/* Documents Table */}
+      {/* Reports Table */}
       <Card padding={false}>
         <div className="p-5 pb-0">
-          <CardTitle>Documents</CardTitle>
+          <CardTitle>Reports</CardTitle>
           <CardDescription>
-            {documents.length} document{documents.length !== 1 ? 's' : ''} found.
+            {documents.length} report{documents.length !== 1 ? 's' : ''} found.
           </CardDescription>
         </div>
         <div className="mt-4">
@@ -163,6 +176,15 @@ export default function DocumentsPage() {
                   header: 'Doc Number',
                   render: (d) => (
                     <span className="font-mono text-xs">{d.document_number ?? '-'}</span>
+                  ),
+                },
+                {
+                  key: 'store_id',
+                  header: 'Store',
+                  render: (d) => (
+                    <span className="text-muted">
+                      {stores.find((s) => s.id === d.store_id)?.name ?? `#${d.store_id}`}
+                    </span>
                   ),
                 },
                 {

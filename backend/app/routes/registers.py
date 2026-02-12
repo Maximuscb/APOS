@@ -21,10 +21,11 @@ SECURITY:
 
 from flask import Blueprint, request, jsonify, g, current_app
 from sqlalchemy import desc
+import json
 
-from ..models import Register, RegisterSession, CashDrawerEvent
+from ..models import Register, RegisterSession, CashDrawerEvent, CashDrawer, Printer
 from ..extensions import db
-from ..services import register_service, permission_service, store_service, session_service
+from ..services import register_service, permission_service, store_service, session_service, tenant_service
 from ..services.register_service import ShiftError
 from ..decorators import require_auth, require_permission
 from datetime import datetime
@@ -37,12 +38,25 @@ def _is_admin() -> bool:
     return permission_service.user_has_permission(g.current_user.id, "SYSTEM_ADMIN")
 
 
+def _is_global_operator() -> bool:
+    return bool(getattr(g.current_user, "is_developer", False)) or _is_admin()
+
+
 def _ensure_store_scope(store_id: int | None):
-    if _is_admin():
+    if store_id is not None:
+        try:
+            tenant_service.require_store_in_org(store_id, g.org_id)
+        except tenant_service.TenantAccessError:
+            return jsonify({"error": "Store access denied"}), 403
+    if _is_global_operator():
         return
-    if g.current_user.store_id and store_id and g.current_user.store_id != store_id:
+    if g.store_id is not None and store_id is not None and g.store_id != store_id:
         return jsonify({"error": "Store access denied"}), 403
     return None
+
+
+def _get_register_in_org(register_id: int) -> Register | None:
+    return db.session.query(Register).filter_by(id=register_id, org_id=g.org_id).first()
 
 
 def _get_cash_drawer_policy(store_id: int) -> str:
@@ -70,30 +84,33 @@ def create_register_route():
     Request body:
     {
         "store_id": 1,
-        "register_number": "REG-01",
+        "register_number": "REG-01",  // optional (auto-assigned if omitted)
         "name": "Front Counter Register 1",
-        "location": "Main Floor",
-        "device_id": "DEVICE-12345"  (optional)
+        "location": "Main Floor"
     }
     """
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
 
         store_id = data.get("store_id")
         register_number = data.get("register_number")
         name = data.get("name")
         location = data.get("location")
-        device_id = data.get("device_id")
 
-        if not all([store_id, register_number, name]):
-            return jsonify({"error": "store_id, register_number, and name required"}), 400
+        if not all([store_id, name]):
+            return jsonify({"error": "store_id and name required"}), 400
+        try:
+            tenant_service.require_store_in_org(store_id, g.org_id)
+        except tenant_service.TenantAccessError:
+            return jsonify({"error": "Store access denied"}), 403
 
         register = register_service.create_register(
             store_id=store_id,
             register_number=register_number,
             name=name,
             location=location,
-            device_id=device_id
+            org_id=g.org_id,
+            actor_user_id=g.current_user.id,
         )
 
         return jsonify({"register": register.to_dict()}), 201
@@ -117,17 +134,15 @@ def list_registers_route():
     Available to: admin, manager, cashier
     """
     store_id = request.args.get("store_id", type=int)
+    if store_id is None:
+        return jsonify({"error": "store_id is required"}), 400
 
     scope_error = _ensure_store_scope(store_id)
     if scope_error:
         return scope_error
 
-    query = db.session.query(Register).filter_by(is_active=True)
-
-    if store_id:
-        query = query.filter_by(store_id=store_id)
-    elif g.current_user.store_id and not _is_admin():
-        query = query.filter_by(store_id=g.current_user.store_id)
+    query = db.session.query(Register).filter_by(is_active=True, org_id=g.org_id)
+    query = query.filter_by(store_id=store_id)
 
     registers = query.order_by(Register.register_number).all()
 
@@ -156,7 +171,7 @@ def get_register_route(register_id: int):
     Requires: CREATE_SALE permission
     Available to: admin, manager, cashier
     """
-    register = db.session.query(Register).get(register_id)
+    register = _get_register_in_org(register_id)
 
     if not register:
         return jsonify({"error": "Register not found"}), 404
@@ -191,24 +206,44 @@ def update_register_route(register_id: int):
     Available to: admin, manager
     """
     try:
-        register = db.session.query(Register).get(register_id)
+        register = _get_register_in_org(register_id)
 
         if not register:
             return jsonify({"error": "Register not found"}), 404
 
-        data = request.get_json()
+        data = request.get_json() or {}
+        changed: dict[str, object] = {}
 
         # Update allowed fields
         if "name" in data:
-            register.name = data["name"]
+            new_name = data["name"]
+            if register.name != new_name:
+                changed["name"] = {"from": register.name, "to": new_name}
+                register.name = new_name
         if "location" in data:
-            register.location = data["location"]
-        if "device_id" in data:
-            register.device_id = data["device_id"]
+            new_location = data["location"]
+            if register.location != new_location:
+                changed["location"] = {"from": register.location, "to": new_location}
+                register.location = new_location
         if "is_active" in data:
-            register.is_active = data["is_active"]
+            new_is_active = bool(data["is_active"])
+            if register.is_active != new_is_active:
+                changed["is_active"] = {"from": register.is_active, "to": new_is_active}
+                register.is_active = new_is_active
 
         register.updated_at = datetime.utcnow()
+        if changed:
+            register_service.append_ledger_event(
+                store_id=register.store_id,
+                event_type="device.register_updated",
+                event_category="device",
+                entity_type="register",
+                entity_id=register.id,
+                actor_user_id=g.current_user.id,
+                register_id=register.id,
+                note=f"Register {register.register_number} updated",
+                payload=json.dumps(changed),
+            )
         db.session.commit()
 
         return jsonify({"register": register.to_dict()}), 200
@@ -247,7 +282,7 @@ def open_shift_route(register_id: int):
         if opening_cash_cents < 0:
             return jsonify({"error": "opening_cash_cents cannot be negative"}), 400
 
-        register = db.session.query(Register).get(register_id)
+        register = _get_register_in_org(register_id)
         if not register:
             return jsonify({"error": "Register not found"}), 404
         scope_error = _ensure_store_scope(register.store_id)
@@ -343,7 +378,7 @@ def force_close_register_route(register_id: int):
     }
     """
     try:
-        register = db.session.query(Register).get(register_id)
+        register = _get_register_in_org(register_id)
         if not register:
             return jsonify({"error": "Register not found"}), 404
         scope_error = _ensure_store_scope(register.store_id)
@@ -429,7 +464,7 @@ def list_sessions_route(register_id: int):
     limit = request.args.get("limit", 50, type=int)
 
     query = db.session.query(RegisterSession).filter_by(register_id=register_id)
-    register = db.session.query(Register).get(register_id)
+    register = _get_register_in_org(register_id)
     if not register:
         return jsonify({"error": "Register not found"}), 404
     scope_error = _ensure_store_scope(register.store_id)
@@ -619,7 +654,7 @@ def list_drawer_events_route(register_id: int):
     end_date = request.args.get("end_date")
     limit = request.args.get("limit", 100, type=int)
 
-    register = db.session.query(Register).get(register_id)
+    register = _get_register_in_org(register_id)
     if not register:
         return jsonify({"error": "Register not found"}), 404
     scope_error = _ensure_store_scope(register.store_id)
@@ -650,3 +685,308 @@ def list_drawer_events_route(register_id: int):
     return jsonify({
         "events": [e.to_dict() for e in events]
     }), 200
+
+
+# =============================================================================
+# CASH DRAWER HARDWARE CRUD
+# =============================================================================
+
+@registers_bp.get("/<int:register_id>/cash-drawer")
+@require_auth
+@require_permission("CREATE_SALE")
+def get_cash_drawer(register_id: int):
+    """Get the cash drawer config for a register."""
+    register = _get_register_in_org(register_id)
+    if not register:
+        return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
+
+    drawer = db.session.query(CashDrawer).filter_by(register_id=register_id).first()
+    return jsonify({"cash_drawer": drawer.to_dict() if drawer else None}), 200
+
+
+@registers_bp.route("/<int:register_id>/cash-drawer", methods=["POST", "PUT"])
+@require_auth
+@require_permission("MANAGE_REGISTER")
+def upsert_cash_drawer(register_id: int):
+    """Create or update the cash drawer for a register."""
+    register = _get_register_in_org(register_id)
+    if not register:
+        return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
+
+    data = request.get_json() or {}
+    drawer = db.session.query(CashDrawer).filter_by(register_id=register_id).first()
+
+    is_create = drawer is None
+    changed: dict[str, object] = {}
+    if not drawer:
+        drawer = CashDrawer(register_id=register_id)
+        db.session.add(drawer)
+
+    if "model" in data:
+        new_model = (data["model"] or "").strip() or None
+        if drawer.model != new_model:
+            changed["model"] = {"from": drawer.model, "to": new_model}
+            drawer.model = new_model
+    if "serial_number" in data:
+        new_serial_number = (data["serial_number"] or "").strip() or None
+        if drawer.serial_number != new_serial_number:
+            changed["serial_number"] = {"from": drawer.serial_number, "to": new_serial_number}
+            drawer.serial_number = new_serial_number
+    if "connection_type" in data:
+        new_connection_type = (data["connection_type"] or "").strip() or None
+        if drawer.connection_type != new_connection_type:
+            changed["connection_type"] = {"from": drawer.connection_type, "to": new_connection_type}
+            drawer.connection_type = new_connection_type
+    if "connection_address" in data:
+        new_connection_address = (data["connection_address"] or "").strip() or None
+        if drawer.connection_address != new_connection_address:
+            changed["connection_address"] = {"from": drawer.connection_address, "to": new_connection_address}
+            drawer.connection_address = new_connection_address
+    if "is_active" in data:
+        new_is_active = bool(data["is_active"])
+        if drawer.is_active != new_is_active:
+            changed["is_active"] = {"from": drawer.is_active, "to": new_is_active}
+            drawer.is_active = new_is_active
+
+    db.session.flush()
+    register_service.append_ledger_event(
+        store_id=register.store_id,
+        event_type="device.cash_drawer_created" if is_create else "device.cash_drawer_updated",
+        event_category="device",
+        entity_type="cash_drawer",
+        entity_id=drawer.id,
+        actor_user_id=g.current_user.id,
+        register_id=register.id,
+        note=f"Cash drawer {'configured' if is_create else 'updated'} for register {register.register_number}",
+        payload=json.dumps(changed) if changed else None,
+    )
+
+    db.session.commit()
+    return jsonify({"cash_drawer": drawer.to_dict()}), 200
+
+
+@registers_bp.delete("/<int:register_id>/cash-drawer")
+@require_auth
+@require_permission("MANAGE_REGISTER")
+def delete_cash_drawer(register_id: int):
+    """Remove cash drawer config from a register."""
+    register = _get_register_in_org(register_id)
+    if not register:
+        return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
+
+    drawer = db.session.query(CashDrawer).filter_by(register_id=register_id).first()
+    if not drawer:
+        return jsonify({"error": "No cash drawer configured"}), 404
+
+    register_service.append_ledger_event(
+        store_id=register.store_id,
+        event_type="device.cash_drawer_deleted",
+        event_category="device",
+        entity_type="cash_drawer",
+        entity_id=drawer.id,
+        actor_user_id=g.current_user.id,
+        register_id=register.id,
+        note=f"Cash drawer removed from register {register.register_number}",
+    )
+    db.session.delete(drawer)
+    db.session.commit()
+    return jsonify({"message": "Cash drawer removed"}), 200
+
+
+# =============================================================================
+# PRINTER CRUD
+# =============================================================================
+
+@registers_bp.get("/<int:register_id>/printers")
+@require_auth
+@require_permission("CREATE_SALE")
+def list_printers(register_id: int):
+    """List all printers for a register."""
+    register = _get_register_in_org(register_id)
+    if not register:
+        return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
+
+    printers = db.session.query(Printer).filter_by(register_id=register_id).order_by(Printer.name).all()
+    return jsonify({"printers": [p.to_dict() for p in printers]}), 200
+
+
+@registers_bp.post("/<int:register_id>/printers")
+@require_auth
+@require_permission("MANAGE_REGISTER")
+def create_printer(register_id: int):
+    """Add a printer to a register."""
+    register = _get_register_in_org(register_id)
+    if not register:
+        return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
+
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
+    printer_type = (data.get("printer_type") or "").strip().upper()
+
+    if not name or not printer_type:
+        return jsonify({"error": "name and printer_type are required"}), 400
+
+    valid_types = {"RECEIPT", "KITCHEN", "LABEL", "REPORT"}
+    if printer_type not in valid_types:
+        return jsonify({"error": f"printer_type must be one of: {', '.join(sorted(valid_types))}"}), 400
+
+    printer = Printer(
+        register_id=register_id,
+        name=name,
+        printer_type=printer_type,
+        model=(data.get("model") or "").strip() or None,
+        serial_number=(data.get("serial_number") or "").strip() or None,
+        connection_type=(data.get("connection_type") or "").strip() or None,
+        connection_address=(data.get("connection_address") or "").strip() or None,
+        paper_width_mm=data.get("paper_width_mm"),
+        supports_cut=data.get("supports_cut", True),
+        supports_cash_drawer=data.get("supports_cash_drawer", False),
+    )
+    db.session.add(printer)
+    db.session.flush()
+    register_service.append_ledger_event(
+        store_id=register.store_id,
+        event_type="device.printer_created",
+        event_category="device",
+        entity_type="printer",
+        entity_id=printer.id,
+        actor_user_id=g.current_user.id,
+        register_id=register.id,
+        note=f"Printer {printer.name} created for register {register.register_number}",
+    )
+    db.session.commit()
+    return jsonify({"printer": printer.to_dict()}), 201
+
+
+@registers_bp.patch("/printers/<int:printer_id>")
+@require_auth
+@require_permission("MANAGE_REGISTER")
+def update_printer(printer_id: int):
+    """Update a printer's configuration."""
+    printer = db.session.query(Printer).filter_by(id=printer_id).first()
+    if not printer:
+        return jsonify({"error": "Printer not found"}), 404
+
+    register = _get_register_in_org(printer.register_id)
+    if not register:
+        return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
+
+    data = request.get_json() or {}
+    changed: dict[str, object] = {}
+
+    if "name" in data:
+        new_name = (data["name"] or "").strip() or printer.name
+        if printer.name != new_name:
+            changed["name"] = {"from": printer.name, "to": new_name}
+            printer.name = new_name
+    if "printer_type" in data:
+        pt = (data["printer_type"] or "").strip().upper()
+        valid_types = {"RECEIPT", "KITCHEN", "LABEL", "REPORT"}
+        if pt not in valid_types:
+            return jsonify({"error": f"printer_type must be one of: {', '.join(sorted(valid_types))}"}), 400
+        if printer.printer_type != pt:
+            changed["printer_type"] = {"from": printer.printer_type, "to": pt}
+            printer.printer_type = pt
+    if "model" in data:
+        new_model = (data["model"] or "").strip() or None
+        if printer.model != new_model:
+            changed["model"] = {"from": printer.model, "to": new_model}
+            printer.model = new_model
+    if "serial_number" in data:
+        new_serial_number = (data["serial_number"] or "").strip() or None
+        if printer.serial_number != new_serial_number:
+            changed["serial_number"] = {"from": printer.serial_number, "to": new_serial_number}
+            printer.serial_number = new_serial_number
+    if "connection_type" in data:
+        new_connection_type = (data["connection_type"] or "").strip() or None
+        if printer.connection_type != new_connection_type:
+            changed["connection_type"] = {"from": printer.connection_type, "to": new_connection_type}
+            printer.connection_type = new_connection_type
+    if "connection_address" in data:
+        new_connection_address = (data["connection_address"] or "").strip() or None
+        if printer.connection_address != new_connection_address:
+            changed["connection_address"] = {"from": printer.connection_address, "to": new_connection_address}
+            printer.connection_address = new_connection_address
+    if "paper_width_mm" in data:
+        new_paper_width_mm = data["paper_width_mm"]
+        if printer.paper_width_mm != new_paper_width_mm:
+            changed["paper_width_mm"] = {"from": printer.paper_width_mm, "to": new_paper_width_mm}
+            printer.paper_width_mm = new_paper_width_mm
+    if "supports_cut" in data:
+        new_supports_cut = bool(data["supports_cut"])
+        if printer.supports_cut != new_supports_cut:
+            changed["supports_cut"] = {"from": printer.supports_cut, "to": new_supports_cut}
+            printer.supports_cut = new_supports_cut
+    if "supports_cash_drawer" in data:
+        new_supports_cash_drawer = bool(data["supports_cash_drawer"])
+        if printer.supports_cash_drawer != new_supports_cash_drawer:
+            changed["supports_cash_drawer"] = {"from": printer.supports_cash_drawer, "to": new_supports_cash_drawer}
+            printer.supports_cash_drawer = new_supports_cash_drawer
+    if "is_active" in data:
+        new_is_active = bool(data["is_active"])
+        if printer.is_active != new_is_active:
+            changed["is_active"] = {"from": printer.is_active, "to": new_is_active}
+            printer.is_active = new_is_active
+
+    register_service.append_ledger_event(
+        store_id=register.store_id,
+        event_type="device.printer_updated",
+        event_category="device",
+        entity_type="printer",
+        entity_id=printer.id,
+        actor_user_id=g.current_user.id,
+        register_id=register.id,
+        note=f"Printer {printer.name} updated",
+        payload=json.dumps(changed) if changed else None,
+    )
+    db.session.commit()
+    return jsonify({"printer": printer.to_dict()}), 200
+
+
+@registers_bp.delete("/printers/<int:printer_id>")
+@require_auth
+@require_permission("MANAGE_REGISTER")
+def delete_printer(printer_id: int):
+    """Remove a printer from a register."""
+    printer = db.session.query(Printer).filter_by(id=printer_id).first()
+    if not printer:
+        return jsonify({"error": "Printer not found"}), 404
+
+    register = _get_register_in_org(printer.register_id)
+    if not register:
+        return jsonify({"error": "Register not found"}), 404
+    scope_error = _ensure_store_scope(register.store_id)
+    if scope_error:
+        return scope_error
+
+    register_service.append_ledger_event(
+        store_id=register.store_id,
+        event_type="device.printer_deleted",
+        event_category="device",
+        entity_type="printer",
+        entity_id=printer.id,
+        actor_user_id=g.current_user.id,
+        register_id=register.id,
+        note=f"Printer {printer.name} removed",
+    )
+    db.session.delete(printer)
+    db.session.commit()
+    return jsonify({"message": "Printer removed"}), 200

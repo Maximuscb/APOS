@@ -14,10 +14,9 @@ import { DataTable } from '@/components/ui/DataTable';
 type Register = {
   id: number;
   store_id: number;
-  register_number: number;
+  register_number: number | string;
   name: string;
   location: string | null;
-  device_id: string | null;
   is_active: boolean;
 };
 
@@ -322,10 +321,6 @@ export default function RegistersPage() {
                   <div>
                     <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Location</p>
                     <p className="text-sm text-slate-900 mt-0.5">{detail.location ?? '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Device ID</p>
-                    <p className="text-sm text-slate-900 mt-0.5 font-mono text-xs">{detail.device_id ?? '-'}</p>
                   </div>
                   <div>
                     <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Status</p>

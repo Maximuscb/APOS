@@ -63,6 +63,42 @@ class User(db.Model):
             "last_login_at": to_utc_z(self.last_login_at) if self.last_login_at else None,
         }
 
+
+class UserStoreManagerAccess(db.Model):
+    """
+    Per-user managerial access to additional stores in the same organization.
+
+    WHY: A user remains affiliated to a primary store (User.store_id), but can
+    be granted manager-level oversight on multiple stores.
+    """
+    __tablename__ = "user_store_manager_access"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "store_id", name="uq_user_store_manager_access"),
+        db.Index("ix_user_store_manager_access_user", "user_id"),
+        db.Index("ix_user_store_manager_access_store", "store_id"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
+    granted_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    granted_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+
+    user = db.relationship("User", foreign_keys=[user_id], backref=db.backref("manager_store_access", lazy=True))
+    store = db.relationship("Store", backref=db.backref("manager_user_access", lazy=True))
+    granted_by = db.relationship("User", foreign_keys=[granted_by_user_id])
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "store_id": self.store_id,
+            "granted_by_user_id": self.granted_by_user_id,
+            "granted_at": to_utc_z(self.granted_at),
+        }
+
+
 class Role(db.Model):
     """
     Role-based permissions.

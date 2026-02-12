@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardDescription, CardTitle } from '@/components/ui/Card';
 import { Input, Select } from '@/components/ui/Input';
 import { Tabs } from '@/components/ui/Tabs';
-import { Badge } from '@/components/ui/Badge';
 
 type StoreConfig = {
   id: number;
@@ -59,18 +58,18 @@ const deviceSettings: SettingDef[] = [
 ];
 
 export default function SettingsPage() {
-  const { currentStoreId: storeId, currentStoreName, stores } = useStore();
-  const { hasRole, hasPermission } = useAuth();
-  const isAdmin = hasRole('admin');
+  const { currentStoreId: storeId, stores } = useStore();
+  const { hasPermission } = useAuth();
+  const canManageOrganization = hasPermission('MANAGE_ORGANIZATION');
+  const canSwitchStore = hasPermission('MANAGE_STORES') && stores.length > 1;
 
-  const [activeTab, setActiveTab] = useState(isAdmin && stores.length > 1 ? 'organization' : 'store');
+  const [activeTab, setActiveTab] = useState(canManageOrganization && canSwitchStore ? 'organization' : 'store');
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   // Store settings
-  const [storeConfigs, setStoreConfigs] = useState<StoreConfig[]>([]);
   const [cashDrawerMode, setCashDrawerMode] = useState('MANAGER_ONLY');
   const [selectedStoreId, setSelectedStoreId] = useState(storeId);
 
@@ -78,27 +77,23 @@ export default function SettingsPage() {
   const [orgSettings, setOrgSettings] = useState<OrgSetting[]>([]);
 
   // Device settings
-  const [deviceSettingsData, setDeviceSettingsData] = useState<DeviceSettingRow[]>([]);
+  const [, setDeviceSettingsData] = useState<DeviceSettingRow[]>([]);
   const [registers, setRegisters] = useState<RegisterOption[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
   const [autoLogoutMinutes, setAutoLogoutMinutes] = useState('0');
 
-  const [loading, setLoading] = useState(true);
 
   // Load store configs
   useEffect(() => {
     if (!selectedStoreId) return;
-    setLoading(true);
     setError('');
     setSuccess('');
     api.get<StoreConfig[]>(`/api/stores/${selectedStoreId}/configs`)
       .then((rows) => {
-        setStoreConfigs(rows);
         const approvalMode = rows.find((r) => r.key === 'cash_drawer_approval_mode')?.value;
         setCashDrawerMode((approvalMode ?? 'MANAGER_ONLY').toUpperCase());
       })
-      .catch((err: any) => setError(err?.detail ?? 'Failed to load store settings.'))
-      .finally(() => setLoading(false));
+      .catch((err: any) => setError(err?.detail ?? 'Failed to load store settings.'));
   }, [selectedStoreId]);
 
   // Load registers for device tab
@@ -126,11 +121,11 @@ export default function SettingsPage() {
 
   // Load org settings
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!canManageOrganization) return;
     api.get<OrgSetting[]>(`/api/organizations/1/settings`)
       .then(setOrgSettings)
       .catch(() => {});
-  }, [isAdmin]);
+  }, [canManageOrganization]);
 
   // Search filter
   const searchLower = search.toLowerCase();
@@ -170,7 +165,7 @@ export default function SettingsPage() {
   }
 
   const tabs = [];
-  if (isAdmin && stores.length > 1) {
+  if (canManageOrganization && canSwitchStore) {
     tabs.push({ value: 'organization', label: 'Organization' });
   }
   tabs.push({ value: 'store', label: 'Store' });
@@ -229,7 +224,7 @@ export default function SettingsPage() {
       {/* Store Tab */}
       {activeTab === 'store' && (
         <div className="space-y-4">
-          {isAdmin && stores.length > 1 && (
+          {canSwitchStore && (
             <Select
               label="Store"
               value={String(selectedStoreId)}

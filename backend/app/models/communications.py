@@ -149,3 +149,32 @@ class Task(db.Model):
             "completed_at": to_utc_z(self.completed_at),
             "created_at": to_utc_z(self.created_at),
         }
+
+
+class CommunicationDismissal(db.Model):
+    """
+    Per-user dismissal tracking for login banner notifications.
+    """
+    __tablename__ = "communication_dismissals"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "communication_kind", "communication_id", name="uq_comm_dismissal_user_kind_id"),
+        db.Index("ix_comm_dismissal_user", "user_id"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    communication_kind = db.Column(db.String(16), nullable=False, index=True)  # ANNOUNCEMENT, REMINDER
+    communication_id = db.Column(db.Integer, nullable=False, index=True)
+    dismissed_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now(), index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "org_id": self.org_id,
+            "user_id": self.user_id,
+            "communication_kind": self.communication_kind,
+            "communication_id": self.communication_id,
+            "dismissed_at": to_utc_z(self.dismissed_at),
+        }

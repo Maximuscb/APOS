@@ -16,6 +16,8 @@
 #   Initialize permissions and assign defaults to roles.
 # - python -m flask system reset-db --yes
 #   DEV/TEST only: drop and recreate all tables (deletes all data).
+# - python -m flask system wipe --yes
+#   Clear all transactional data but keep default users, org, store, roles, and permissions.
 #
 # Organization management (MULTI-TENANT):
 # - python -m flask orgs list
@@ -36,6 +38,10 @@
 #   List permissions (optionally filtered by role or category).
 # - python -m flask perms check admin SYSTEM_ADMIN
 #   Check whether a user has a permission.
+# - python -m flask perms enforce-developer-access --dry-run
+#   Audit DEVELOPER_ACCESS assignments and overrides.
+# - python -m flask perms enforce-developer-access --fix
+#   Remove DEVELOPER_ACCESS from non-developer roles and disable overrides.
 # - python -m flask perms grant cashier VOID_SALE
 #   Grant a permission to a role.
 # - python -m flask perms revoke cashier VOID_SALE
@@ -54,13 +60,16 @@
 #   Delete security events older than the retention window.
 
 import click
+from datetime import timedelta
 from flask.cli import with_appcontext
 
 from .extensions import db
-from .models import Store, User, Role, UserRole, Permission, RolePermission, Organization
+from .models import Store, User, Role, UserRole, Permission, RolePermission, Organization, UserPermissionOverride
 from .services.auth_service import create_user, create_default_roles, assign_role, hash_password, PasswordValidationError
 from .services import permission_service
 from .services import maintenance_service
+from .services.ledger_service import ensure_org_master_ledger
+from .time_utils import utcnow
 
 
 @click.group('system')
@@ -99,6 +108,9 @@ def init_system(org_name, org_code):
         click.echo(f"PASS Created default organization: {org.name} (ID: {org.id}, Code: {org.code})")
     else:
         click.echo(f"PASS Using existing organization: {org.name} (ID: {org.id})")
+
+    ensure_org_master_ledger(org.id)
+    db.session.commit()
 
     # 2. Ensure default store exists within the organization
     store = db.session.query(Store).filter_by(org_id=org.id).first()
@@ -244,6 +256,8 @@ def create_org_cli(name, code):
 
     org = Organization(name=name, code=code, is_active=True)
     db.session.add(org)
+    db.session.flush()
+    ensure_org_master_ledger(org.id)
     db.session.commit()
 
     click.echo(f"PASS Created organization: {org.name} (ID: {org.id}, Code: {org.code})")
@@ -457,6 +471,964 @@ def reset_db(yes):
     click.echo("PASS Database reset complete. Run 'python -m flask system init' to initialize.")
 
 
+@system_group.command('wipe')
+@click.option('--yes', is_flag=True, help='Skip confirmation')
+@with_appcontext
+def wipe_data(yes):
+    """
+    Clear all transactional data while preserving system structure.
+
+    Keeps: default users (admin, developer, manager, cashier),
+    the default organization, default store, roles, permissions,
+    and role-permission assignments.
+
+    Removes: all sales, inventory, documents, registers, timekeeping,
+    communications, promotions, imports, audit logs, sessions,
+    extra users, extra orgs/stores, and user permission overrides.
+    """
+    if not yes:
+        click.confirm("WARN This will DELETE all transactional data. Are you sure?", abort=True)
+
+    # Lazy imports to avoid bloating module-level imports
+    from .models.auth import SessionToken
+    from .models.security import SecurityEvent
+    from .models.inventory import (
+        Product, InventoryTransaction, ProductIdentifier, Vendor,
+        ReceiveDocument, ReceiveDocumentLine,
+    )
+    from .models.sales import Sale, SaleLine, Payment, PaymentTransaction
+    from .models.documents import (
+        Return, ReturnLine, Transfer, TransferLine,
+        Count, CountLine, MasterLedgerEvent, DocumentSequence,
+    )
+    from .models.registers import Register, RegisterSession, CashDrawerEvent, CashDrawer, Printer
+    from .models.timekeeping import TimeClockEntry, TimeClockBreak, TimeClockCorrection
+    from .models.imports import ImportBatch, ImportStagingRow, ImportEntityMapping
+    from .models.communications import Announcement, Reminder, Task
+    from .models.promotions import Promotion
+    from .models.settings import OrganizationSetting, DeviceSetting
+    from .models.tenancy import StoreConfig
+
+    click.echo("WIPE  Clearing transactional data...")
+
+    default_usernames = ['admin', 'developer', 'manager', 'cashier']
+    default_users = db.session.query(User).filter(User.username.in_(default_usernames)).all()
+    default_user_ids = [u.id for u in default_users]
+
+    if not default_user_ids:
+        click.echo("WARN  No default users found — nothing to preserve. Run 'flask system init' first.")
+        return
+
+    # Determine the default org (from admin user)
+    admin_user = next((u for u in default_users if u.username == 'admin'), default_users[0])
+    default_org_id = admin_user.org_id
+
+    # Delete in FK-safe order (children before parents)
+    tables = [
+        # Timekeeping
+        ("TimeClockBreak", TimeClockBreak),
+        ("TimeClockCorrection", TimeClockCorrection),
+        ("TimeClockEntry", TimeClockEntry),
+        # Registers
+        ("CashDrawerEvent", CashDrawerEvent),
+        ("RegisterSession", RegisterSession),
+        ("Printer", Printer),
+        ("CashDrawer", CashDrawer),
+        ("DeviceSetting", DeviceSetting),
+        ("Register", Register),
+        # Sales
+        ("PaymentTransaction", PaymentTransaction),
+        ("Payment", Payment),
+        ("ReturnLine", ReturnLine),
+        ("Return", Return),
+        ("SaleLine", SaleLine),
+        ("Sale", Sale),
+        # Documents
+        ("ReceiveDocumentLine", ReceiveDocumentLine),
+        ("ReceiveDocument", ReceiveDocument),
+        ("TransferLine", TransferLine),
+        ("Transfer", Transfer),
+        ("CountLine", CountLine),
+        ("Count", Count),
+        # Inventory
+        ("InventoryTransaction", InventoryTransaction),
+        ("ProductIdentifier", ProductIdentifier),
+        ("Product", Product),
+        ("Vendor", Vendor),
+        # Imports
+        ("ImportEntityMapping", ImportEntityMapping),
+        ("ImportStagingRow", ImportStagingRow),
+        ("ImportBatch", ImportBatch),
+        # Communications & Promotions
+        ("Announcement", Announcement),
+        ("Reminder", Reminder),
+        ("Task", Task),
+        ("Promotion", Promotion),
+        # Audit & Events
+        ("MasterLedgerEvent", MasterLedgerEvent),
+        ("SecurityEvent", SecurityEvent),
+        ("DocumentSequence", DocumentSequence),
+        # Settings
+        ("OrganizationSetting", OrganizationSetting),
+        ("StoreConfig", StoreConfig),
+        # Sessions & Overrides
+        ("SessionToken", SessionToken),
+        ("UserPermissionOverride", UserPermissionOverride),
+    ]
+
+    total_deleted = 0
+    for name, model in tables:
+        count = db.session.query(model).delete()
+        if count:
+            click.echo(f"  DELETE {name}: {count} rows")
+            total_deleted += count
+
+    # Remove non-default users and their role assignments
+    extra_roles = db.session.query(UserRole).filter(~UserRole.user_id.in_(default_user_ids)).delete()
+    extra_users = db.session.query(User).filter(~User.id.in_(default_user_ids)).delete()
+    if extra_users:
+        click.echo(f"  DELETE Users (non-default): {extra_users}")
+        total_deleted += extra_users
+    if extra_roles:
+        click.echo(f"  DELETE UserRoles (non-default): {extra_roles}")
+        total_deleted += extra_roles
+
+    # Remove extra orgs and stores
+    if default_org_id:
+        extra_stores = db.session.query(Store).filter(Store.org_id != default_org_id).delete()
+        extra_orgs = db.session.query(Organization).filter(Organization.id != default_org_id).delete()
+        if extra_stores:
+            click.echo(f"  DELETE Stores (non-default org): {extra_stores}")
+            total_deleted += extra_stores
+        if extra_orgs:
+            click.echo(f"  DELETE Organizations (non-default): {extra_orgs}")
+            total_deleted += extra_orgs
+
+    db.session.commit()
+
+    if total_deleted == 0:
+        click.echo("PASS Nothing to delete — database was already clean.")
+    else:
+        click.echo(f"\nPASS Wiped {total_deleted} total rows.")
+
+    click.echo(f"   Preserved users: {[u.username for u in default_users]}")
+    click.echo(f"   Preserved org: {default_org_id}")
+
+
+@system_group.command('seed-defaults')
+@click.option('--org-id', type=int, help='Organization ID (defaults to first org)')
+@click.option('--store-id', type=int, help='Store ID (defaults to first store in org)')
+@click.option('--days-history', type=int, default=30, show_default=True, help='How far back historical demo data should go')
+@click.option('--password', default='Password123!', show_default=True, help='Password for any seeded users')
+@with_appcontext
+def seed_defaults(org_id, store_id, days_history, password):
+    """
+    Seed a realistic POS demo dataset so a fresh environment is immediately usable.
+
+    Safe to rerun: records use deterministic codes/document numbers and are skipped
+    when they already exist.
+    """
+    from .models import (
+        Product,
+        ProductIdentifier,
+        Vendor,
+        ReceiveDocument,
+        ReceiveDocumentLine,
+        InventoryTransaction,
+        Register,
+        RegisterSession,
+        CashDrawer,
+        CashDrawerEvent,
+        Printer,
+        Sale,
+        SaleLine,
+        Payment,
+        PaymentTransaction,
+        Return,
+        ReturnLine,
+        Count,
+        CountLine,
+        Announcement,
+        Reminder,
+        Task,
+        UserStoreManagerAccess,
+    )
+    from .services.ledger_service import append_ledger_event
+    from .services import register_service
+    from .permissions import DEFAULT_ROLE_PERMISSIONS
+
+    created_counts = {
+        "stores": 0,
+        "users": 0,
+        "manager_store_access": 0,
+        "vendors": 0,
+        "products": 0,
+        "identifiers": 0,
+        "registers": 0,
+        "drawers": 0,
+        "printers": 0,
+        "sessions": 0,
+        "drawer_events": 0,
+        "receives": 0,
+        "receive_lines": 0,
+        "inventory_txns": 0,
+        "sales": 0,
+        "sale_lines": 0,
+        "payments": 0,
+        "payment_txns": 0,
+        "returns": 0,
+        "return_lines": 0,
+        "counts": 0,
+        "count_lines": 0,
+        "announcements": 0,
+        "reminders": 0,
+        "tasks": 0,
+    }
+
+    def ensure_user(username: str, email: str, role_name: str, primary_store_id: int) -> User:
+        user = db.session.query(User).filter_by(org_id=org.id, username=username).first()
+        if not user:
+            user = create_user(
+                username=username,
+                email=email,
+                password=password,
+                org_id=org.id,
+                store_id=primary_store_id,
+            )
+            created_counts["users"] += 1
+
+        role = db.session.query(Role).filter_by(org_id=org.id, name=role_name).first()
+        if role:
+            user_role = db.session.query(UserRole).filter_by(user_id=user.id, role_id=role.id).first()
+            if not user_role:
+                db.session.add(UserRole(user_id=user.id, role_id=role.id))
+                db.session.commit()
+        return user
+
+    def ensure_manager_store_access(user_id: int, managed_store_id: int, granted_by_user_id: int | None) -> None:
+        existing = db.session.query(UserStoreManagerAccess).filter_by(
+            user_id=user_id,
+            store_id=managed_store_id,
+        ).first()
+        if existing:
+            return
+        db.session.add(
+            UserStoreManagerAccess(
+                user_id=user_id,
+                store_id=managed_store_id,
+                granted_by_user_id=granted_by_user_id,
+            )
+        )
+        db.session.commit()
+        created_counts["manager_store_access"] += 1
+
+    def ensure_default_permissions_for_org(org_scope_id: int) -> None:
+        for role_name, permission_codes in DEFAULT_ROLE_PERMISSIONS.items():
+            role = db.session.query(Role).filter_by(org_id=org_scope_id, name=role_name).first()
+            if not role:
+                continue
+            for permission_code in permission_codes:
+                permission = db.session.query(Permission).filter_by(code=permission_code).first()
+                if not permission:
+                    continue
+                existing = db.session.query(RolePermission).filter_by(
+                    role_id=role.id,
+                    permission_id=permission.id,
+                ).first()
+                if not existing:
+                    db.session.add(RolePermission(role_id=role.id, permission_id=permission.id))
+        db.session.commit()
+
+    if days_history < 1:
+        click.echo("FAIL --days-history must be >= 1")
+        return
+
+    if org_id:
+        org = db.session.query(Organization).filter_by(id=org_id).first()
+        if not org:
+            click.echo(f"FAIL Organization {org_id} not found")
+            return
+    else:
+        org = db.session.query(Organization).first()
+        if not org:
+            org = Organization(name="Demo Organization", code="DEMO", is_active=True)
+            db.session.add(org)
+            db.session.commit()
+            click.echo(f"Created organization: {org.name} (ID: {org.id})")
+
+    # Ensure baseline RBAC exists before creating users.
+    ensure_org_master_ledger(org.id)
+    db.session.commit()
+    create_default_roles(org.id)
+    permission_service.initialize_permissions()
+    ensure_default_permissions_for_org(org.id)
+
+    if store_id:
+        main_store = db.session.query(Store).filter_by(id=store_id, org_id=org.id).first()
+        if not main_store:
+            click.echo(f"FAIL Store {store_id} not found in organization {org.id}")
+            return
+    else:
+        main_store = db.session.query(Store).filter_by(org_id=org.id).order_by(Store.id.asc()).first()
+        if not main_store:
+            main_store = Store(org_id=org.id, name="Main Store", code="MAIN")
+            db.session.add(main_store)
+            db.session.commit()
+            created_counts["stores"] += 1
+
+    branch_store = db.session.query(Store).filter_by(org_id=org.id, code="BRANCH").first()
+    if not branch_store:
+        branch_store = db.session.query(Store).filter_by(org_id=org.id, name="Branch Store").first()
+        if branch_store and not branch_store.code:
+            conflicting_branch_code = db.session.query(Store).filter_by(org_id=org.id, code="BRANCH").first()
+            if not conflicting_branch_code:
+                branch_store.code = "BRANCH"
+                db.session.commit()
+    if not branch_store:
+        branch_store = Store(org_id=org.id, name="Branch Store", code="BRANCH")
+        db.session.add(branch_store)
+        db.session.commit()
+        created_counts["stores"] += 1
+
+    admin_user = ensure_user("admin", "admin@apos.local", "admin", main_store.id)
+    manager_user = ensure_user("manager", "manager@apos.local", "manager", main_store.id)
+    cashier_user = ensure_user("cashier", "cashier@apos.local", "cashier", main_store.id)
+
+    ensure_manager_store_access(manager_user.id, main_store.id, admin_user.id)
+    if branch_store.id != main_store.id:
+        ensure_manager_store_access(manager_user.id, branch_store.id, admin_user.id)
+
+    vendors_seed = [
+        ("DEMO-ALPHA", "Alpha Wholesale", "orders@alpha-wholesale.demo"),
+        ("DEMO-FRESH", "Fresh Farms Supply", "procurement@freshfarms.demo"),
+        ("DEMO-BEVERAGE", "Beverage Partners", "sales@beverage-partners.demo"),
+    ]
+    vendors = []
+    for code, name, email in vendors_seed:
+        vendor = db.session.query(Vendor).filter_by(org_id=org.id, code=code).first()
+        if not vendor:
+            vendor = Vendor(
+                org_id=org.id,
+                code=code,
+                name=name,
+                contact_email=email,
+                is_active=True,
+                notes="Seeded by system seed-defaults",
+            )
+            db.session.add(vendor)
+            db.session.commit()
+            created_counts["vendors"] += 1
+        vendors.append(vendor)
+
+    products_seed = [
+        ("DEMO-COFFEE-12OZ", "Coffee Beans 12oz", 1299, 899, "012345670001"),
+        ("DEMO-CREAMER-16OZ", "Vanilla Creamer 16oz", 499, 299, "012345670002"),
+        ("DEMO-SUGAR-2LB", "Cane Sugar 2lb", 699, 449, "012345670003"),
+        ("DEMO-TEA-BOX", "Black Tea Box", 899, 559, "012345670004"),
+        ("DEMO-WATER-24PK", "Spring Water 24pk", 749, 520, "012345670005"),
+        ("DEMO-CUP-16OZ-50", "Paper Cups 16oz (50)", 1099, 650, "012345670006"),
+    ]
+    products = []
+    for sku, name, price_cents, cost_cents, upc in products_seed:
+        product = db.session.query(Product).filter_by(store_id=main_store.id, sku=sku).first()
+        if not product:
+            product = Product(
+                store_id=main_store.id,
+                sku=sku,
+                name=name,
+                price_cents=price_cents,
+                is_active=True,
+                description="Seeded demo product",
+            )
+            db.session.add(product)
+            db.session.commit()
+            created_counts["products"] += 1
+        products.append((product, cost_cents))
+
+        identifier = db.session.query(ProductIdentifier).filter_by(
+            org_id=org.id,
+            type="UPC",
+            value=upc,
+        ).first()
+        if not identifier:
+            db.session.add(
+                ProductIdentifier(
+                    product_id=product.id,
+                    org_id=org.id,
+                    store_id=main_store.id,
+                    type="UPC",
+                    value=upc,
+                    is_primary=True,
+                    is_active=True,
+                )
+            )
+            db.session.commit()
+            created_counts["identifiers"] += 1
+
+    register_configs = [
+        ("1", "Front Register", "Front Counter"),
+        ("2", "Express Register", "Express Lane"),
+    ]
+    registers = []
+    for reg_number, reg_name, location in register_configs:
+        register = db.session.query(Register).filter_by(store_id=main_store.id, register_number=reg_number).first()
+        if not register:
+            register = register_service.create_register(
+                store_id=main_store.id,
+                register_number=reg_number,
+                name=reg_name,
+                location=location,
+                org_id=org.id,
+                actor_user_id=admin_user.id,
+            )
+            created_counts["registers"] += 1
+        registers.append(register)
+
+        drawer = db.session.query(CashDrawer).filter_by(register_id=register.id).first()
+        if not drawer:
+            db.session.add(
+                CashDrawer(
+                    register_id=register.id,
+                    model="APOS Standard Drawer",
+                    serial_number=f"DEMO-CD-{register.id}",
+                    connection_type="USB",
+                    connection_address=f"USB-{register.id}",
+                    is_active=True,
+                )
+            )
+            db.session.commit()
+            created_counts["drawers"] += 1
+
+    receipt_printer = db.session.query(Printer).filter_by(
+        register_id=registers[0].id,
+        name="Front Receipt Printer",
+    ).first()
+    if not receipt_printer:
+        db.session.add(
+            Printer(
+                register_id=registers[0].id,
+                name="Front Receipt Printer",
+                printer_type="RECEIPT",
+                model="Epson TM-T88VI",
+                connection_type="NETWORK",
+                connection_address="192.168.1.50:9100",
+                paper_width_mm=80,
+                supports_cut=True,
+                supports_cash_drawer=True,
+                is_active=True,
+            )
+        )
+        db.session.commit()
+        created_counts["printers"] += 1
+
+    now = utcnow()
+    start_time = now - timedelta(days=days_history)
+
+    closed_session = db.session.query(RegisterSession).filter_by(
+        register_id=registers[0].id,
+        status="CLOSED",
+    ).order_by(RegisterSession.id.desc()).first()
+    if not closed_session:
+        closed_session = RegisterSession(
+            register_id=registers[0].id,
+            user_id=cashier_user.id,
+            opened_by_user_id=manager_user.id,
+            status="CLOSED",
+            opening_cash_cents=20000,
+            closing_cash_cents=24850,
+            expected_cash_cents=24850,
+            variance_cents=0,
+            opened_at=start_time,
+            closed_at=start_time + timedelta(hours=8),
+            notes="Seeded historical session",
+        )
+        db.session.add(closed_session)
+        db.session.commit()
+        created_counts["sessions"] += 1
+
+    open_session = db.session.query(RegisterSession).filter_by(
+        register_id=registers[1].id,
+        status="OPEN",
+    ).first()
+    if not open_session:
+        open_session = RegisterSession(
+            register_id=registers[1].id,
+            user_id=cashier_user.id,
+            opened_by_user_id=cashier_user.id,
+            status="OPEN",
+            opening_cash_cents=15000,
+            expected_cash_cents=15000,
+            opened_at=now - timedelta(hours=2),
+            notes="Seeded active session",
+        )
+        db.session.add(open_session)
+        db.session.commit()
+        created_counts["sessions"] += 1
+
+    existing_session_event = db.session.query(CashDrawerEvent).filter_by(
+        register_session_id=closed_session.id,
+        event_type="SHIFT_OPEN",
+    ).first()
+    if not existing_session_event:
+        db.session.add(
+            CashDrawerEvent(
+                register_session_id=closed_session.id,
+                register_id=registers[0].id,
+                user_id=cashier_user.id,
+                event_type="SHIFT_OPEN",
+                amount_cents=closed_session.opening_cash_cents,
+                reason="Seeded opening event",
+                occurred_at=closed_session.opened_at,
+            )
+        )
+        db.session.add(
+            CashDrawerEvent(
+                register_session_id=closed_session.id,
+                register_id=registers[0].id,
+                user_id=cashier_user.id,
+                event_type="SHIFT_CLOSE",
+                amount_cents=closed_session.closing_cash_cents,
+                reason="Seeded closing event",
+                occurred_at=closed_session.closed_at,
+            )
+        )
+        db.session.commit()
+        created_counts["drawer_events"] += 2
+
+    receive_doc = db.session.query(ReceiveDocument).filter_by(
+        store_id=main_store.id,
+        document_number="DEMO-RCV-0001",
+    ).first()
+    if not receive_doc:
+        receive_doc = ReceiveDocument(
+            store_id=main_store.id,
+            vendor_id=vendors[0].id,
+            document_number="DEMO-RCV-0001",
+            receive_type="PURCHASE",
+            status="POSTED",
+            occurred_at=start_time + timedelta(days=1),
+            notes="Seeded opening inventory receipt",
+            reference_number="PO-DEMO-1001",
+            created_by_user_id=manager_user.id,
+            approved_by_user_id=manager_user.id,
+            posted_by_user_id=manager_user.id,
+            approved_at=start_time + timedelta(days=1, hours=1),
+            posted_at=start_time + timedelta(days=1, hours=2),
+        )
+        db.session.add(receive_doc)
+        db.session.flush()
+        created_counts["receives"] += 1
+
+        for idx, (product, unit_cost) in enumerate(products):
+            qty = 30 + (idx * 3)
+            inv_txn = InventoryTransaction(
+                store_id=main_store.id,
+                product_id=product.id,
+                type="RECEIVE",
+                quantity_delta=qty,
+                unit_cost_cents=unit_cost,
+                note="Seeded receive document posting",
+                occurred_at=receive_doc.posted_at,
+                status="POSTED",
+                approved_by_user_id=manager_user.id,
+                approved_at=receive_doc.approved_at,
+                posted_by_user_id=manager_user.id,
+                posted_at=receive_doc.posted_at,
+                inventory_state="SELLABLE",
+            )
+            db.session.add(inv_txn)
+            db.session.flush()
+            created_counts["inventory_txns"] += 1
+
+            line = ReceiveDocumentLine(
+                receive_document_id=receive_doc.id,
+                product_id=product.id,
+                quantity=qty,
+                unit_cost_cents=unit_cost,
+                line_cost_cents=qty * unit_cost,
+                note="Seeded line",
+                inventory_transaction_id=inv_txn.id,
+            )
+            db.session.add(line)
+            created_counts["receive_lines"] += 1
+
+        append_ledger_event(
+            store_id=main_store.id,
+            event_type="inventory.receive_posted",
+            event_category="inventory",
+            entity_type="receive_document",
+            entity_id=receive_doc.id,
+            actor_user_id=manager_user.id,
+            occurred_at=receive_doc.posted_at,
+            note="Seeded posted receive document",
+        )
+        db.session.commit()
+
+    for i in range(1, 6):
+        doc_num = f"DEMO-S-{i:04d}"
+        sale = db.session.query(Sale).filter_by(store_id=main_store.id, document_number=doc_num).first()
+        if sale:
+            continue
+
+        sale_time = now - timedelta(days=max(days_history - i, 1))
+        first = products[(i - 1) % len(products)][0]
+        second = products[i % len(products)][0]
+        first_qty = 1 + (i % 3)
+        second_qty = 1
+        total_due = (first.price_cents * first_qty) + (second.price_cents * second_qty)
+
+        sale = Sale(
+            store_id=main_store.id,
+            document_number=doc_num,
+            status="COMPLETED",
+            created_at=sale_time,
+            completed_at=sale_time + timedelta(minutes=3),
+            created_by_user_id=cashier_user.id,
+            register_id=registers[0].id,
+            register_session_id=closed_session.id,
+            payment_status="PAID",
+            total_due_cents=total_due,
+            total_paid_cents=total_due,
+            change_due_cents=0,
+        )
+        db.session.add(sale)
+        db.session.flush()
+        created_counts["sales"] += 1
+
+        sale_lines = [
+            SaleLine(
+                sale_id=sale.id,
+                product_id=first.id,
+                quantity=first_qty,
+                unit_price_cents=first.price_cents,
+                line_total_cents=first.price_cents * first_qty,
+            ),
+            SaleLine(
+                sale_id=sale.id,
+                product_id=second.id,
+                quantity=second_qty,
+                unit_price_cents=second.price_cents,
+                line_total_cents=second.price_cents * second_qty,
+            ),
+        ]
+        for line in sale_lines:
+            db.session.add(line)
+            created_counts["sale_lines"] += 1
+
+        payment = Payment(
+            sale_id=sale.id,
+            tender_type="CARD" if i % 2 == 0 else "CASH",
+            amount_cents=total_due,
+            status="COMPLETED",
+            reference_number=f"SEED-PAY-{sale.id}",
+            change_cents=0,
+            created_by_user_id=cashier_user.id,
+            register_id=registers[0].id,
+            register_session_id=closed_session.id,
+            created_at=sale.completed_at,
+        )
+        db.session.add(payment)
+        db.session.flush()
+        created_counts["payments"] += 1
+
+        db.session.add(
+            PaymentTransaction(
+                payment_id=payment.id,
+                sale_id=sale.id,
+                transaction_type="PAYMENT",
+                amount_cents=total_due,
+                tender_type=payment.tender_type,
+                user_id=cashier_user.id,
+                occurred_at=sale.completed_at,
+                register_id=registers[0].id,
+                register_session_id=closed_session.id,
+            )
+        )
+        created_counts["payment_txns"] += 1
+
+        for product, qty in [(first, first_qty), (second, second_qty)]:
+            db.session.add(
+                InventoryTransaction(
+                    store_id=main_store.id,
+                    product_id=product.id,
+                    type="SALE",
+                    quantity_delta=-qty,
+                    note=f"Seeded sale {doc_num}",
+                    occurred_at=sale.completed_at,
+                    sale_id=str(sale.id),
+                    status="POSTED",
+                    posted_by_user_id=cashier_user.id,
+                    posted_at=sale.completed_at,
+                    inventory_state="SELLABLE",
+                )
+            )
+            created_counts["inventory_txns"] += 1
+
+        append_ledger_event(
+            store_id=main_store.id,
+            event_type="sale.completed",
+            event_category="sales",
+            entity_type="sale",
+            entity_id=sale.id,
+            actor_user_id=cashier_user.id,
+            register_id=registers[0].id,
+            register_session_id=closed_session.id,
+            sale_id=sale.id,
+            occurred_at=sale.completed_at,
+            note=f"Seeded sale {doc_num}",
+        )
+        append_ledger_event(
+            store_id=main_store.id,
+            event_type="payment.completed",
+            event_category="payment",
+            entity_type="payment",
+            entity_id=payment.id,
+            actor_user_id=cashier_user.id,
+            register_id=registers[0].id,
+            register_session_id=closed_session.id,
+            sale_id=sale.id,
+            payment_id=payment.id,
+            occurred_at=sale.completed_at,
+            note=f"Seeded payment for {doc_num}",
+        )
+        db.session.commit()
+
+    seed_sale = db.session.query(Sale).filter_by(store_id=main_store.id, document_number="DEMO-S-0001").first()
+    seed_sale_line = seed_sale.lines[0] if seed_sale and seed_sale.lines else None
+    return_doc = db.session.query(Return).filter_by(
+        store_id=main_store.id,
+        document_number="DEMO-RET-0001",
+    ).first()
+    if seed_sale and seed_sale_line and not return_doc:
+        return_doc = Return(
+            store_id=main_store.id,
+            document_number="DEMO-RET-0001",
+            original_sale_id=seed_sale.id,
+            status="COMPLETED",
+            reason="Seeded sample customer return",
+            restocking_fee_cents=0,
+            refund_amount_cents=seed_sale_line.unit_price_cents,
+            created_at=now - timedelta(days=2),
+            approved_at=now - timedelta(days=2, minutes=-10),
+            completed_at=now - timedelta(days=2, minutes=-20),
+            created_by_user_id=cashier_user.id,
+            approved_by_user_id=manager_user.id,
+            completed_by_user_id=cashier_user.id,
+            register_id=registers[0].id,
+            register_session_id=closed_session.id,
+        )
+        db.session.add(return_doc)
+        db.session.flush()
+        created_counts["returns"] += 1
+
+        inv_txn = InventoryTransaction(
+            store_id=main_store.id,
+            product_id=seed_sale_line.product_id,
+            type="RETURN",
+            quantity_delta=1,
+            note="Seeded return restock",
+            occurred_at=return_doc.completed_at,
+            status="POSTED",
+            approved_by_user_id=manager_user.id,
+            approved_at=return_doc.approved_at,
+            posted_by_user_id=cashier_user.id,
+            posted_at=return_doc.completed_at,
+            inventory_state="SELLABLE",
+        )
+        db.session.add(inv_txn)
+        db.session.flush()
+        created_counts["inventory_txns"] += 1
+
+        db.session.add(
+            ReturnLine(
+                return_id=return_doc.id,
+                original_sale_line_id=seed_sale_line.id,
+                product_id=seed_sale_line.product_id,
+                quantity=1,
+                unit_price_cents=seed_sale_line.unit_price_cents,
+                line_refund_cents=seed_sale_line.unit_price_cents,
+                original_unit_cost_cents=None,
+                original_cogs_cents=None,
+                inventory_transaction_id=inv_txn.id,
+            )
+        )
+        created_counts["return_lines"] += 1
+
+        append_ledger_event(
+            store_id=main_store.id,
+            event_type="return.completed",
+            event_category="returns",
+            entity_type="return",
+            entity_id=return_doc.id,
+            actor_user_id=cashier_user.id,
+            register_id=registers[0].id,
+            register_session_id=closed_session.id,
+            return_id=return_doc.id,
+            occurred_at=return_doc.completed_at,
+            note="Seeded sample return",
+        )
+        db.session.commit()
+
+    count_doc = db.session.query(Count).filter_by(
+        store_id=main_store.id,
+        document_number="DEMO-C-0001",
+    ).first()
+    if not count_doc:
+        count_doc = Count(
+            store_id=main_store.id,
+            document_number="DEMO-C-0001",
+            count_type="CYCLE",
+            status="POSTED",
+            reason="Seeded cycle count",
+            created_by_user_id=manager_user.id,
+            approved_by_user_id=manager_user.id,
+            posted_by_user_id=manager_user.id,
+            created_at=now - timedelta(days=1, hours=5),
+            approved_at=now - timedelta(days=1, hours=4, minutes=45),
+            posted_at=now - timedelta(days=1, hours=4, minutes=30),
+            total_variance_units=0,
+            total_variance_cost_cents=0,
+        )
+        db.session.add(count_doc)
+        db.session.flush()
+        created_counts["counts"] += 1
+
+        for idx, (product, unit_cost) in enumerate(products[:3]):
+            expected = 20 + idx
+            actual = expected + (1 if idx == 1 else 0)
+            variance = actual - expected
+            var_cost = variance * unit_cost
+
+            inv_txn = None
+            if variance != 0:
+                inv_txn = InventoryTransaction(
+                    store_id=main_store.id,
+                    product_id=product.id,
+                    type="ADJUST",
+                    quantity_delta=variance,
+                    unit_cost_cents=unit_cost,
+                    note="Seeded count variance posting",
+                    occurred_at=count_doc.posted_at,
+                    status="POSTED",
+                    approved_by_user_id=manager_user.id,
+                    approved_at=count_doc.approved_at,
+                    posted_by_user_id=manager_user.id,
+                    posted_at=count_doc.posted_at,
+                    inventory_state="SELLABLE",
+                )
+                db.session.add(inv_txn)
+                db.session.flush()
+                created_counts["inventory_txns"] += 1
+
+            db.session.add(
+                CountLine(
+                    count_id=count_doc.id,
+                    product_id=product.id,
+                    expected_quantity=expected,
+                    actual_quantity=actual,
+                    variance_quantity=variance,
+                    unit_cost_cents=unit_cost,
+                    variance_cost_cents=var_cost,
+                    inventory_transaction_id=inv_txn.id if inv_txn else None,
+                )
+            )
+            created_counts["count_lines"] += 1
+
+        append_ledger_event(
+            store_id=main_store.id,
+            event_type="count.posted",
+            event_category="counts",
+            entity_type="count",
+            entity_id=count_doc.id,
+            actor_user_id=manager_user.id,
+            count_id=count_doc.id,
+            occurred_at=count_doc.posted_at,
+            note="Seeded posted cycle count",
+        )
+        db.session.commit()
+
+    announcement = db.session.query(Announcement).filter_by(
+        org_id=org.id,
+        title="Seeded: Store Opening Brief",
+    ).first()
+    if not announcement:
+        db.session.add(
+            Announcement(
+                org_id=org.id,
+                store_id=main_store.id,
+                title="Seeded: Store Opening Brief",
+                body="Review promotions, verify drawer counts, and confirm receipt printer status.",
+                priority="HIGH",
+                created_by_user_id=manager_user.id,
+                target_type="STORE",
+                target_id=main_store.id,
+                display_type="LOGIN_POPUP",
+                is_active=True,
+            )
+        )
+        db.session.commit()
+        created_counts["announcements"] += 1
+
+    reminder = db.session.query(Reminder).filter_by(
+        org_id=org.id,
+        title="Seeded: End of Day Count",
+    ).first()
+    if not reminder:
+        db.session.add(
+            Reminder(
+                org_id=org.id,
+                store_id=main_store.id,
+                title="Seeded: End of Day Count",
+                body="Run cycle count on high-velocity SKUs before close.",
+                created_by_user_id=manager_user.id,
+                target_type="STORE",
+                target_id=main_store.id,
+                repeat_type="DAILY",
+                display_type="LOGIN_POPUP",
+                is_active=True,
+            )
+        )
+        db.session.commit()
+        created_counts["reminders"] += 1
+
+    task = db.session.query(Task).filter_by(
+        org_id=org.id,
+        title="Seeded: Verify register supplies",
+    ).first()
+    if not task:
+        db.session.add(
+            Task(
+                org_id=org.id,
+                store_id=main_store.id,
+                title="Seeded: Verify register supplies",
+                description="Confirm receipt paper, drawer till, and scanner readiness.",
+                created_by_user_id=manager_user.id,
+                assigned_to_user_id=cashier_user.id,
+                assigned_to_register_id=registers[0].id,
+                task_type="REGISTER",
+                status="PENDING",
+                due_at=now + timedelta(hours=4),
+            )
+        )
+        db.session.commit()
+        created_counts["tasks"] += 1
+
+    click.echo("")
+    click.echo("Seed completed.")
+    click.echo(f"Organization: {org.name} (ID: {org.id})")
+    click.echo(f"Main store: {main_store.name} (ID: {main_store.id})")
+    click.echo(f"Branch store: {branch_store.name} (ID: {branch_store.id})")
+    click.echo("")
+    click.echo("Created this run:")
+    for key in sorted(created_counts.keys()):
+        click.echo(f"  {key:<20} {created_counts[key]}")
+    click.echo("")
+    click.echo("Suggested login users:")
+    click.echo("  admin   / Password123!")
+    click.echo("  manager / Password123!")
+    click.echo("  cashier / Password123!")
+
+
 # =============================================================================
 # PERMISSION MANAGEMENT COMMANDS
 # =============================================================================
@@ -630,6 +1602,88 @@ def check_permission_cli(username, permission_code):
     click.echo(f"Total permissions: {len(all_perms)}")
 
 
+@perms_group.command('enforce-developer-access')
+@click.option('--dry-run', is_flag=True, help='Audit only; do not write changes')
+@click.option('--fix', is_flag=True, help='Apply remediation changes')
+@with_appcontext
+def enforce_developer_access_cli(dry_run, fix):
+    """
+    Enforce DEVELOPER_ACCESS policy.
+
+    Policy:
+    - DEVELOPER_ACCESS must only be assigned to the 'developer' role.
+    - Per-user overrides for DEVELOPER_ACCESS are disabled (protected permission).
+    """
+    if dry_run and fix:
+        click.echo("FAIL Use only one mode: --dry-run or --fix")
+        return
+
+    apply_changes = fix and not dry_run
+    mode_label = "FIX" if apply_changes else "DRY-RUN"
+    click.echo(f"\n{mode_label} Enforcing DEVELOPER_ACCESS policy...\n")
+
+    developer_perm = db.session.query(Permission).filter_by(code='DEVELOPER_ACCESS').first()
+    if not developer_perm:
+        click.echo("FAIL Permission 'DEVELOPER_ACCESS' not found. Run: python -m flask system init-permissions")
+        return
+
+    # Find all role assignments for DEVELOPER_ACCESS
+    dev_role_perms = db.session.query(RolePermission).filter_by(permission_id=developer_perm.id).all()
+    non_developer_role_perms = []
+    for rp in dev_role_perms:
+        role = db.session.query(Role).get(rp.role_id)
+        if role and role.name != 'developer':
+            non_developer_role_perms.append((rp, role))
+
+    # Find all active per-user overrides for DEVELOPER_ACCESS
+    dev_overrides = db.session.query(UserPermissionOverride).filter_by(
+        permission_code='DEVELOPER_ACCESS',
+        is_active=True,
+    ).all()
+
+    click.echo(f"Found {len(dev_role_perms)} DEVELOPER_ACCESS role assignments")
+    click.echo(f"Found {len(non_developer_role_perms)} non-developer role violations")
+    click.echo(f"Found {len(dev_overrides)} active DEVELOPER_ACCESS overrides")
+
+    if non_developer_role_perms:
+        click.echo("\nNon-developer roles with DEVELOPER_ACCESS:")
+        for _, role in non_developer_role_perms:
+            click.echo(f"  - role='{role.name}' (role_id={role.id}, org_id={role.org_id})")
+
+    if dev_overrides:
+        click.echo("\nActive DEVELOPER_ACCESS overrides:")
+        for o in dev_overrides:
+            user = db.session.query(User).get(o.user_id)
+            username = user.username if user else f"user#{o.user_id}"
+            click.echo(
+                f"  - override_id={o.id} user={username} "
+                f"type={o.override_type} is_developer={bool(user and user.is_developer)}"
+            )
+
+    if not apply_changes:
+        click.echo("\nNo changes applied (dry run).")
+        return
+
+    # Remediate role violations
+    removed_role_links = 0
+    for rp, _ in non_developer_role_perms:
+        db.session.delete(rp)
+        removed_role_links += 1
+
+    # Remediate overrides (disable; permission is protected anyway)
+    disabled_overrides = 0
+    for o in dev_overrides:
+        o.is_active = False
+        o.revocation_reason = "Policy enforcement: DEVELOPER_ACCESS is developer-specific"
+        disabled_overrides += 1
+
+    db.session.commit()
+
+    click.echo("\nPASS Policy enforcement complete")
+    click.echo(f"  Removed role-permission links: {removed_role_links}")
+    click.echo(f"  Disabled overrides: {disabled_overrides}")
+
+
 # =============================================================================
 # REGISTER MANAGEMENT COMMANDS
 # =============================================================================
@@ -641,12 +1695,11 @@ def registers_group():
 
 @registers_group.command('create')
 @click.option('--store-id', type=int, required=True, help='Store ID')
-@click.option('--number', required=True, help='Register number (e.g., REG-01)')
+@click.option('--number', help='Register number (optional, auto-assigned if omitted)')
 @click.option('--name', required=True, help='Register name')
 @click.option('--location', help='Location in store')
-@click.option('--device-id', help='Device/hardware ID')
 @with_appcontext
-def create_register_cli(store_id, number, name, location, device_id):
+def create_register_cli(store_id, number, name, location):
     """
     Create a new POS register.
 
@@ -662,7 +1715,6 @@ def create_register_cli(store_id, number, name, location, device_id):
             register_number=number,
             name=name,
             location=location,
-            device_id=device_id
         )
 
         click.echo(f"PASS Created register: {register.register_number} - {register.name}")

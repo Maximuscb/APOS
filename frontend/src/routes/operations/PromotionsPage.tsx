@@ -119,7 +119,7 @@ export function PromotionsPage() {
                 </div>
               </div>
               {canManage && (
-                <Button size="sm" variant="outline" onClick={() => toggleActive(p.id, p.is_active)}>
+                <Button size="sm" variant="secondary" onClick={() => toggleActive(p.id, p.is_active)}>
                   {p.is_active ? 'Deactivate' : 'Activate'}
                 </Button>
               )}
@@ -159,7 +159,7 @@ export function PromotionsPage() {
             onChange={(e) => setDiscountValue(e.target.value)}
           />
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setShowCreate(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
             <Button onClick={handleCreate}>Create</Button>
           </div>
         </div>

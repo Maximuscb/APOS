@@ -19,15 +19,15 @@ DESIGN PRINCIPLES:
 from ..extensions import db
 from ..models import User, UserRole, Role, RolePermission, Permission, SecurityEvent, UserPermissionOverride
 from ..permissions import PERMISSION_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS
+from .ledger_service import append_ledger_event
 from app.time_utils import utcnow
 
 
-# Protected permissions that cannot be granted via user overrides
-# These are admin-level permissions that should only come from roles
-# Admin-level permissions cannot be altered by per-user overrides.
+# Protected permissions that cannot be granted via user overrides.
+# Policy: roles are defaults and users can be configured with any
+# non-developer permission. Developer-specific access remains protected.
 PROTECTED_PERMISSIONS = {
-    "SYSTEM_ADMIN",
-    "MANAGE_PERMISSIONS",
+    "DEVELOPER_ACCESS",
 }
 
 
@@ -82,6 +82,23 @@ def log_security_event(
     )
 
     db.session.add(event)
+
+    # Mirror store-scoped security events into the master ledger so they can
+    # participate in unified reporting. Org-only events without store context
+    # remain in security_events only.
+    if store_id is not None:
+        db.session.flush()
+        append_ledger_event(
+            store_id=store_id,
+            event_type=f"security.{event_type.lower()}",
+            event_category="security",
+            entity_type="security_event",
+            entity_id=event.id,
+            actor_user_id=user_id,
+            note=reason,
+            payload=f"resource={resource};action={action};success={success}",
+        )
+
     db.session.commit()
 
     return event
@@ -194,7 +211,7 @@ def grant_permission_override(
     Grant or deny a permission via per-user override.
 
     override_type must be "GRANT" or "DENY".
-    Admin-level permissions cannot be altered via overrides.
+    Developer-specific permissions cannot be altered via overrides.
     """
     if permission_code in PROTECTED_PERMISSIONS:
         raise ValueError("Permission overrides cannot modify admin permissions")

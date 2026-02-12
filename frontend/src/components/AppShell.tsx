@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { useAuth } from '@/context/AuthContext';
@@ -25,13 +25,15 @@ function useClock() {
 }
 
 export function AppShell() {
-  const { user, logout, hasRole, isDeveloper, switchOrg } = useAuth();
-  const { currentStoreId, currentStoreName, setStoreId, stores } = useStore();
+  const { user, logout, isDeveloper, switchOrg } = useAuth();
+  const { currentStoreName } = useStore();
   const navigate = useNavigate();
   const { time, date } = useClock();
 
   const [devOrgs, setDevOrgs] = useState<OrgOption[]>([]);
   const [currentOrgId, setCurrentOrgId] = useState<number | null>(null);
+  const [orgPickerOpen, setOrgPickerOpen] = useState(false);
+  const orgPickerRef = useRef<HTMLDivElement>(null);
 
   // Fetch orgs list for developer users
   useEffect(() => {
@@ -40,12 +42,26 @@ export function AppShell() {
     api.get<{ org_id: number | null }>('/api/developer/status').then((s) => setCurrentOrgId(s.org_id)).catch(() => {});
   }, [isDeveloper]);
 
+  // Close popover on outside click
+  useEffect(() => {
+    if (!orgPickerOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (orgPickerRef.current && !orgPickerRef.current.contains(e.target as Node)) {
+        setOrgPickerOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [orgPickerOpen]);
+
   const handleOrgSwitch = async (orgId: number) => {
+    setOrgPickerOpen(false);
     await switchOrg(orgId);
     setCurrentOrgId(orgId);
-    // Force page reload so StoreContext picks up the new stores
     window.location.reload();
   };
+
+  const currentOrg = devOrgs.find((o) => o.id === currentOrgId);
 
   const handleLogout = async () => {
     await logout();
@@ -57,18 +73,52 @@ export function AppShell() {
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {isDeveloper && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-1 flex items-center gap-3 text-xs">
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-1.5 flex items-center gap-3 text-xs">
           <Badge variant="warning">DEV</Badge>
-          <span className="text-amber-800 font-medium">Organization:</span>
-          <select
-            value={String(currentOrgId ?? '')}
-            onChange={(e) => handleOrgSwitch(Number(e.target.value))}
-            className="h-6 px-2 rounded border border-amber-300 bg-white text-xs text-amber-900 cursor-pointer"
-          >
-            {devOrgs.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}{o.code ? ` (${o.code})` : ''}</option>
-            ))}
-          </select>
+          <div ref={orgPickerRef} className="relative">
+            <button
+              onClick={() => setOrgPickerOpen((p) => !p)}
+              className="h-7 px-3 rounded-lg border border-amber-300 bg-white text-xs font-medium text-amber-900 hover:bg-amber-100 cursor-pointer flex items-center gap-2"
+            >
+              <span className="truncate max-w-48">
+                {currentOrg?.name ?? 'Select organization'}
+              </span>
+              <svg viewBox="0 0 20 20" fill="currentColor" className={`h-3.5 w-3.5 shrink-0 transition-transform ${orgPickerOpen ? 'rotate-180' : ''}`}>
+                <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clipRule="evenodd" />
+              </svg>
+            </button>
+
+            {orgPickerOpen && (
+              <div className="absolute left-0 top-full mt-1 w-64 bg-white rounded-xl border border-border shadow-lg z-50 py-1 max-h-72 overflow-y-auto">
+                {devOrgs.length === 0 && (
+                  <p className="px-3 py-2 text-xs text-muted">No organizations found.</p>
+                )}
+                {devOrgs.map((org) => {
+                  const isActive = org.id === currentOrgId;
+                  return (
+                    <button
+                      key={org.id}
+                      onClick={() => handleOrgSwitch(org.id)}
+                      disabled={isActive}
+                      className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm cursor-pointer ${
+                        isActive
+                          ? 'bg-amber-50 text-amber-900'
+                          : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <span className="w-4 shrink-0 text-amber-600">
+                        {isActive ? '✓' : ''}
+                      </span>
+                      <span className="truncate font-medium">{org.name}</span>
+                      {org.code && (
+                        <Badge variant="muted" className="ml-auto shrink-0">{org.code}</Badge>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
       <header className="sticky top-0 z-40 bg-white border-b border-border shadow-sm">
@@ -83,19 +133,7 @@ export function AppShell() {
               </svg>
             </div>
             <div className="flex flex-col leading-tight min-w-0">
-              {hasRole('admin') && stores.length > 1 ? (
-                <select
-                  value={String(currentStoreId)}
-                  onChange={(e) => setStoreId(Number(e.target.value))}
-                  className="h-7 pl-0 pr-6 rounded-md bg-transparent text-sm font-semibold text-slate-900 cursor-pointer"
-                >
-                  {stores.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-sm font-semibold text-slate-900 truncate">{currentStoreName}</span>
-              )}
+              <span className="text-sm font-semibold text-slate-900 truncate">{currentStoreName}</span>
               <span className="text-xs font-medium text-muted tabular-nums">{date}</span>
               <span className="text-xs font-medium text-muted tabular-nums">{time}</span>
             </div>

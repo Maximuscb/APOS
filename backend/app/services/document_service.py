@@ -18,6 +18,7 @@ from ..models import (
     RegisterSession,
     ImportBatch,
     Register,
+    MasterLedgerEvent,
 )
 from .concurrency import run_with_retry
 
@@ -101,6 +102,8 @@ DOCUMENT_TYPES = {
     "PAYMENTS": Payment,
     "SHIFTS": RegisterSession,
     "IMPORTS": ImportBatch,
+    "DEVICES": MasterLedgerEvent,
+    "EVENTS": MasterLedgerEvent,
 }
 
 
@@ -128,6 +131,17 @@ def _document_to_index_row(doc_type: str, doc) -> dict:
             "register_id": None,
         }
     if doc_type == "ADJUSTMENTS":
+        if hasattr(doc, "event_category"):
+            return {
+                "id": doc.id,
+                "type": doc_type,
+                "document_number": None,
+                "store_id": doc.store_id,
+                "status": doc.event_type,
+                "occurred_at": doc.occurred_at,
+                "user_id": doc.actor_user_id,
+                "register_id": doc.register_id,
+            }
         return {
             "id": doc.id,
             "type": doc_type,
@@ -135,8 +149,10 @@ def _document_to_index_row(doc_type: str, doc) -> dict:
             "store_id": doc.store_id,
             "status": doc.status,
             "occurred_at": doc.occurred_at,
-            "user_id": doc.created_by_user_id,
-            "register_id": doc.register_id,
+            # InventoryTransaction has no created_by_user_id; use the
+            # lifecycle actor fields in priority order.
+            "user_id": doc.posted_by_user_id or doc.approved_by_user_id,
+            "register_id": None,
         }
     if doc_type == "COUNTS":
         return {
@@ -172,6 +188,17 @@ def _document_to_index_row(doc_type: str, doc) -> dict:
             "register_id": doc.register_id,
         }
     if doc_type == "PAYMENTS":
+        if hasattr(doc, "event_category"):
+            return {
+                "id": doc.id,
+                "type": doc_type,
+                "document_number": None,
+                "store_id": doc.store_id,
+                "status": doc.event_type,
+                "occurred_at": doc.occurred_at,
+                "user_id": doc.actor_user_id,
+                "register_id": doc.register_id,
+            }
         return {
             "id": doc.id,
             "type": doc_type,
@@ -203,6 +230,28 @@ def _document_to_index_row(doc_type: str, doc) -> dict:
             "occurred_at": doc.created_at,
             "user_id": doc.created_by_user_id,
             "register_id": None,
+        }
+    if doc_type == "DEVICES":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": None,
+            "store_id": doc.store_id,
+            "status": doc.event_type,
+            "occurred_at": doc.occurred_at,
+            "user_id": doc.actor_user_id,
+            "register_id": doc.register_id,
+        }
+    if doc_type == "EVENTS":
+        return {
+            "id": doc.id,
+            "type": doc_type,
+            "document_number": None,
+            "store_id": doc.store_id,
+            "status": doc.event_type,
+            "occurred_at": doc.occurred_at,
+            "user_id": doc.actor_user_id,
+            "register_id": doc.register_id,
         }
     return {
         "id": doc.id,
@@ -242,30 +291,56 @@ def list_documents(
         query = db.session.query(model)
 
         if dtype == "ADJUSTMENTS":
-            query = query.filter(model.type == "ADJUST")
+            model = MasterLedgerEvent
+            query = db.session.query(model).filter(
+                model.event_category == "inventory",
+                model.event_type == "inventory.adjusted",
+            )
 
         effective_store_ids = store_ids if store_ids is not None else ([store_id] if store_id else None)
 
         if dtype == "TRANSFERS" and effective_store_ids:
             query = query.filter(model.from_store_id.in_(effective_store_ids))
-        elif dtype == "PAYMENTS" and effective_store_ids:
-            query = query.join(Sale, Sale.id == model.sale_id).filter(Sale.store_id.in_(effective_store_ids))
+        elif dtype == "PAYMENTS":
+            model = MasterLedgerEvent
+            query = db.session.query(model).filter(model.event_category == "payment")
+            if effective_store_ids:
+                query = query.filter(model.store_id.in_(effective_store_ids))
         elif dtype == "SHIFTS" and effective_store_ids:
             query = query.filter(model.register_id.isnot(None)).join(
                 Register, Register.id == model.register_id
             ).filter(Register.store_id.in_(effective_store_ids))
+        elif dtype == "DEVICES":
+            query = query.filter(model.event_category == "device")
+            if effective_store_ids:
+                query = query.filter(model.store_id.in_(effective_store_ids))
+        elif dtype == "EVENTS":
+            if effective_store_ids:
+                query = query.filter(model.store_id.in_(effective_store_ids))
+        elif dtype == "IMPORTS" and effective_store_ids:
+            # Imports are org-level (no store_id). Reports are store-scoped.
+            continue
         elif effective_store_ids and hasattr(model, "store_id"):
             query = query.filter(model.store_id.in_(effective_store_ids))
 
-        if user_id and hasattr(model, "created_by_user_id"):
-            query = query.filter(model.created_by_user_id == user_id)
+        if user_id:
+            if model is MasterLedgerEvent:
+                query = query.filter(model.actor_user_id == user_id)
+            elif hasattr(model, "created_by_user_id"):
+                query = query.filter(model.created_by_user_id == user_id)
         if register_id and hasattr(model, "register_id"):
             query = query.filter(model.register_id == register_id)
 
-        if from_date and hasattr(model, "created_at"):
-            query = query.filter(model.created_at >= from_date)
-        if to_date and hasattr(model, "created_at"):
-            query = query.filter(model.created_at <= to_date)
+        if from_date:
+            if model is MasterLedgerEvent:
+                query = query.filter(model.occurred_at >= from_date)
+            elif hasattr(model, "created_at"):
+                query = query.filter(model.created_at >= from_date)
+        if to_date:
+            if model is MasterLedgerEvent:
+                query = query.filter(model.occurred_at <= to_date)
+            elif hasattr(model, "created_at"):
+                query = query.filter(model.created_at <= to_date)
 
         docs = query.order_by(model.id.desc()).all()
         rows.extend([_document_to_index_row(dtype, doc) for doc in docs])

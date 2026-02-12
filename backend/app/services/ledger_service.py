@@ -6,7 +6,7 @@ from typing import Optional
 from datetime import datetime
 
 from ..extensions import db
-from ..models import MasterLedgerEvent
+from ..models import MasterLedgerEvent, OrganizationMasterLedger, Store
 """
 APOS Master Ledger Invariants (authoritative)
 
@@ -45,7 +45,14 @@ def append_ledger_event(
     - No deletes/updates of existing events.
     - occurred_at is business time; created_at is system time (db default).
     """
+    store = db.session.query(Store).filter_by(id=store_id).first()
+    if not store:
+        raise ValueError(f"Store {store_id} not found for ledger event")
+
+    org_ledger = ensure_org_master_ledger(store.org_id)
+
     ev = MasterLedgerEvent(
+        org_ledger_id=org_ledger.id,
         store_id=store_id,
         event_type=event_type,
         event_category=event_category,
@@ -67,3 +74,19 @@ def append_ledger_event(
     db.session.add(ev)
     db.session.flush()  # ensures ev.id is assigned without committing
     return ev
+
+
+def ensure_org_master_ledger(org_id: int, name: str = "Master Ledger") -> OrganizationMasterLedger:
+    """
+    Ensure an organization has exactly one master ledger record.
+
+    Safe to call repeatedly (idempotent).
+    """
+    ledger = db.session.query(OrganizationMasterLedger).filter_by(org_id=org_id).first()
+    if ledger:
+        return ledger
+
+    ledger = OrganizationMasterLedger(org_id=org_id, name=name)
+    db.session.add(ledger)
+    db.session.flush()
+    return ledger

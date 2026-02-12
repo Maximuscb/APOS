@@ -29,9 +29,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setStores([]);
       return;
     }
-    if (user.store_id && currentStoreId !== user.store_id) {
-      setCurrentStoreIdState(user.store_id);
-      saveState('storeId', user.store_id);
+    const boundStoreId = user.is_developer ? null : user.store_id;
+
+    if (boundStoreId && currentStoreId !== boundStoreId) {
+      setCurrentStoreIdState(boundStoreId);
+      saveState('storeId', boundStoreId);
     }
 
     api.get<{ stores?: StoreInfo[] } | StoreInfo[]>('/api/stores')
@@ -41,15 +43,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setStores(resolvedStores);
           const hasCurrent = resolvedStores.some((s) => s.id === currentStoreId);
           if (!hasCurrent) {
-            const nextStoreId = user.store_id ?? resolvedStores[0].id;
+            const nextStoreId = boundStoreId ?? resolvedStores[0].id;
             setCurrentStoreIdState(nextStoreId);
             saveState('storeId', nextStoreId);
           }
         }
       })
       .catch(() => {
-        if (user.store_id) {
-          setStores([{ id: user.store_id, name: `Store ${user.store_id}` }]);
+        if (boundStoreId) {
+          setStores([{ id: boundStoreId, name: `Store ${boundStoreId}` }]);
         }
       });
   }, [user, currentStoreId]);

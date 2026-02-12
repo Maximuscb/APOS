@@ -10,8 +10,9 @@ Corrections are append-only records that require manager approval.
 from datetime import datetime
 
 from ..extensions import db
-from ..models import TimeClockEntry, TimeClockBreak, TimeClockCorrection
+from ..models import TimeClockEntry, TimeClockBreak, TimeClockCorrection, User
 from .ledger_service import append_ledger_event
+from . import communications_service
 from app.time_utils import utcnow
 
 
@@ -57,6 +58,18 @@ def clock_out(*, user_id: int) -> TimeClockEntry:
     entry = _get_open_entry(user_id)
     if not entry:
         raise TimekeepingError("User is not clocked in")
+
+    user = db.session.query(User).filter_by(id=user_id).first()
+    if user and user.org_id:
+        pending = communications_service.pending_tasks_for_clockout(
+            org_id=user.org_id,
+            user_id=user_id,
+            store_id=entry.store_id,
+        )
+        if pending:
+            raise TimekeepingError(
+                "You have pending tasks. Complete or defer assigned tasks before clocking out."
+            )
 
     open_break = db.session.query(TimeClockBreak).filter_by(
         time_clock_entry_id=entry.id,

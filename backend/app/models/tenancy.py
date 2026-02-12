@@ -51,6 +51,45 @@ class Organization(db.Model):
             "updated_at": to_utc_z(self.updated_at),
         }
 
+
+class OrganizationMasterLedger(db.Model):
+    """
+    Canonical append-only master ledger container for an organization.
+
+    WHY:
+    - Each organization owns exactly one master ledger.
+    - Ledger events reference this record so reporting can be org-scoped
+      without relying only on store joins.
+    """
+    __tablename__ = "organization_master_ledgers"
+    __table_args__ = (
+        db.UniqueConstraint("org_id", name="uq_org_master_ledgers_org"),
+        db.Index("ix_org_master_ledgers_org_id", "org_id"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    org_id = db.Column(db.Integer, db.ForeignKey("organizations.id"), nullable=False, index=True)
+    name = db.Column(db.String(128), nullable=False, default="Master Ledger")
+    created_at = db.Column(db.DateTime(timezone=True), nullable=False, server_default=db.func.now())
+    updated_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+        onupdate=db.func.now(),
+    )
+
+    organization = db.relationship("Organization", backref=db.backref("master_ledgers", lazy=True))
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "org_id": self.org_id,
+            "name": self.name,
+            "created_at": to_utc_z(self.created_at),
+            "updated_at": to_utc_z(self.updated_at),
+        }
+
 class Store(db.Model):
     """
     Store within an organization.

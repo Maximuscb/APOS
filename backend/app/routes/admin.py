@@ -15,13 +15,17 @@ All endpoints require authentication and appropriate permissions.
 from flask import Blueprint, request, jsonify, g, current_app
 
 from ..extensions import db
-from ..models import User, Role, UserRole, Permission, RolePermission, UserPermissionOverride
-from ..services import auth_service, session_service, permission_service
+from ..models import User, Role, UserRole, Permission, RolePermission, UserPermissionOverride, Store
+from ..services import auth_service, session_service, permission_service, user_store_access_service
 from ..services.auth_service import PasswordValidationError
 from ..decorators import require_auth, require_permission, require_any_permission
 from ..permissions import PERMISSION_DEFINITIONS, DEFAULT_ROLE_PERMISSIONS
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/api/admin")
+
+
+def _get_user_in_current_org(user_id: int) -> User | None:
+    return db.session.query(User).filter_by(id=user_id, org_id=g.org_id).first()
 
 
 # =============================================================================
@@ -43,6 +47,8 @@ def list_users():
     store_id = request.args.get("store_id", type=int)
 
     query = db.session.query(User)
+    if g.org_id is not None:
+        query = query.filter(User.org_id == g.org_id)
 
     if not include_inactive:
         query = query.filter_by(is_active=True)
@@ -63,6 +69,8 @@ def list_users():
             if role:
                 role_names.append(role.name)
         user_dict["roles"] = role_names
+        explicit_manager_access = user_store_access_service.list_manager_access(user.id)
+        user_dict["explicit_manager_store_ids"] = [item.store_id for item in explicit_manager_access]
         result.append(user_dict)
 
     return jsonify({"users": result, "count": len(result)})
@@ -76,6 +84,8 @@ def get_user(user_id: int):
     user = db.session.query(User).get(user_id)
 
     if not user:
+        return jsonify({"error": "User not found"}), 404
+    if g.org_id is not None and user.org_id != g.org_id:
         return jsonify({"error": "User not found"}), 404
 
     user_dict = user.to_dict()
@@ -196,6 +206,78 @@ def update_user(user_id: int):
     db.session.commit()
 
     return jsonify({"user": user.to_dict(), "message": "User updated successfully"})
+
+
+@admin_bp.get("/users/<int:user_id>/manager-stores")
+@require_auth
+@require_any_permission("EDIT_USER", "MANAGE_STORES")
+def list_user_manager_stores(user_id: int):
+    """List explicit and effective manager-store access for a user."""
+    user = _get_user_in_current_org(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    explicit_items = user_store_access_service.list_manager_access(user_id)
+    effective_store_ids = sorted(user_store_access_service.get_manager_store_ids(user_id, include_primary=True))
+
+    return jsonify({
+        "items": [i.to_dict() for i in explicit_items],
+        "effective_store_ids": effective_store_ids,
+        "primary_store_id": user.store_id,
+    })
+
+
+@admin_bp.post("/users/<int:user_id>/manager-stores")
+@require_auth
+@require_any_permission("EDIT_USER", "MANAGE_STORES")
+def grant_user_manager_store(user_id: int):
+    """Grant manager-store access for a user to an additional store."""
+    user = _get_user_in_current_org(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    data = request.get_json(silent=True) or {}
+    store_id = data.get("store_id")
+    if not store_id:
+        return jsonify({"error": "store_id is required"}), 400
+
+    store = db.session.query(Store).filter_by(id=store_id).first()
+    if not store or store.org_id != g.org_id:
+        return jsonify({"error": "Store not found"}), 404
+
+    try:
+        access = user_store_access_service.grant_manager_access(
+            user_id=user_id,
+            store_id=store_id,
+            granted_by_user_id=g.current_user.id,
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    return jsonify({"item": access.to_dict()}), 201
+
+
+@admin_bp.delete("/users/<int:user_id>/manager-stores/<int:store_id>")
+@require_auth
+@require_any_permission("EDIT_USER", "MANAGE_STORES")
+def revoke_user_manager_store(user_id: int, store_id: int):
+    """Revoke manager-store access for a user."""
+    user = _get_user_in_current_org(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    if user.store_id == store_id:
+        return jsonify({"error": "Cannot revoke user's primary store access"}), 400
+
+    store = db.session.query(Store).filter_by(id=store_id).first()
+    if not store or store.org_id != g.org_id:
+        return jsonify({"error": "Store not found"}), 404
+
+    revoked = user_store_access_service.revoke_manager_access(user_id=user_id, store_id=store_id)
+    if not revoked:
+        return jsonify({"error": "Access mapping not found"}), 404
+
+    return jsonify({"message": "Manager store access revoked"})
 
 
 @admin_bp.post("/users/<int:user_id>/deactivate")
@@ -347,7 +429,10 @@ def reset_user_password(user_id: int):
 @require_permission("VIEW_USERS")
 def list_roles():
     """List all roles with their permission counts."""
-    roles = db.session.query(Role).order_by(Role.name).all()
+    query = db.session.query(Role)
+    if g.org_id is not None:
+        query = query.filter(Role.org_id == g.org_id)
+    roles = query.order_by(Role.name).all()
 
     result = []
     for role in roles:
@@ -365,7 +450,10 @@ def list_roles():
 @require_permission("VIEW_USERS")
 def get_role(role_name: str):
     """Get a role with its full permission list."""
-    role = db.session.query(Role).filter_by(name=role_name).first()
+    query = db.session.query(Role).filter_by(name=role_name)
+    if g.org_id is not None:
+        query = query.filter(Role.org_id == g.org_id)
+    role = query.first()
 
     if not role:
         return jsonify({"error": "Role not found"}), 404

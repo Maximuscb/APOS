@@ -7,18 +7,12 @@ import { Badge } from '@/components/ui/Badge';
 import { Dialog } from '@/components/ui/Dialog';
 import { api } from '@/lib/api';
 
-interface ActiveAnnouncement {
+interface ActiveNotification {
+  kind: 'ANNOUNCEMENT' | 'REMINDER';
   id: number;
   title: string;
   body: string;
   priority: string;
-}
-
-interface ActiveReminder {
-  id: number;
-  title: string;
-  body: string;
-  repeat_type: string;
 }
 
 const priorityVariant: Record<string, 'default' | 'primary' | 'warning' | 'danger'> = {
@@ -39,20 +33,17 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   // Post-login announcements
-  const [announcements, setAnnouncements] = useState<ActiveAnnouncement[]>([]);
-  const [reminders, setReminders] = useState<ActiveReminder[]>([]);
+  const [notifications, setNotifications] = useState<ActiveNotification[]>([]);
   const [showPopup, setShowPopup] = useState(false);
 
   async function fetchActiveComms() {
     try {
-      const res = await api.get<{ announcements: ActiveAnnouncement[]; reminders: ActiveReminder[] }>(
+      const res = await api.get<{ notifications: ActiveNotification[] }>(
         '/api/communications/active',
       );
-      const a = res.announcements ?? [];
-      const r = res.reminders ?? [];
-      if (a.length > 0 || r.length > 0) {
-        setAnnouncements(a);
-        setReminders(r);
+      const n = res.notifications ?? [];
+      if (n.length > 0) {
+        setNotifications(n);
         setShowPopup(true);
         return true;
       }
@@ -62,7 +53,12 @@ export function LoginPage() {
     return false;
   }
 
-  function dismissPopup() {
+  async function dismissPopup() {
+    await Promise.all(
+      notifications.map((n) =>
+        api.post(`/api/communications/notifications/${n.kind}/${n.id}/dismiss`, {}).catch(() => undefined),
+      ),
+    );
     setShowPopup(false);
     navigate('/sales', { replace: true });
   }
@@ -167,38 +163,20 @@ export function LoginPage() {
       {/* Post-login announcements/reminders popup */}
       <Dialog open={showPopup} onClose={dismissPopup} title="Notifications">
         <div className="space-y-4 max-h-[60vh] overflow-y-auto">
-          {announcements.length > 0 && (
-            <div>
-              <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Announcements</p>
-              <div className="space-y-3">
-                {announcements.map((a) => (
-                  <div key={a.id} className="rounded-xl border border-border p-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant={priorityVariant[a.priority] ?? 'default'}>{a.priority}</Badge>
-                    </div>
-                    <h3 className="font-semibold text-slate-900 text-sm">{a.title}</h3>
-                    {a.body && <p className="text-sm text-muted mt-1">{a.body}</p>}
-                  </div>
-                ))}
+          <div className="space-y-3">
+            {notifications.map((n) => (
+              <div key={`${n.kind}-${n.id}`} className="rounded-xl border border-border p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Badge variant={n.kind === 'REMINDER' ? 'warning' : 'primary'}>{n.kind}</Badge>
+                  {n.kind === 'ANNOUNCEMENT' && (
+                    <Badge variant={priorityVariant[n.priority] ?? 'default'}>{n.priority}</Badge>
+                  )}
+                </div>
+                <h3 className="font-semibold text-slate-900 text-sm">{n.title}</h3>
+                {n.body && <p className="text-sm text-muted mt-1">{n.body}</p>}
               </div>
-            </div>
-          )}
-          {reminders.length > 0 && (
-            <div>
-              <p className="text-xs text-muted font-medium uppercase tracking-wider mb-2">Reminders</p>
-              <div className="space-y-3">
-                {reminders.map((r) => (
-                  <div key={r.id} className="rounded-xl border border-border p-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant="primary">{r.repeat_type}</Badge>
-                    </div>
-                    <h3 className="font-semibold text-slate-900 text-sm">{r.title}</h3>
-                    {r.body && <p className="text-sm text-muted mt-1">{r.body}</p>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            ))}
+          </div>
           <div className="flex justify-end pt-2">
             <Button onClick={dismissPopup}>Acknowledge</Button>
           </div>

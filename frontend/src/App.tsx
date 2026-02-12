@@ -11,7 +11,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 // Lazy-load operations sub-pages
 const DashboardPage = lazy(() => import('@/routes/operations/DashboardPage').then((m) => ({ default: m.DashboardPage })));
 const DevicesPage = lazy(() => import('@/routes/operations/DevicesPage'));
-const DocumentsPage = lazy(() => import('@/routes/operations/DocumentsPage'));
+const ReportsPage = lazy(() => import('@/routes/operations/ReportsPage').then((m) => ({ default: m.ReportsPage })));
 const AnalyticsPage = lazy(() => import('@/routes/operations/AnalyticsPage'));
 const ServicesPage = lazy(() => import('@/routes/operations/ServicesPage'));
 const TimekeepingPage = lazy(() => import('@/routes/operations/TimekeepingPage'));
@@ -68,7 +68,8 @@ export default function App() {
                 <Route index element={<Navigate to="/operations/dashboard" replace />} />
                 <Route path="dashboard" element={<Suspense fallback={<Loading />}><DashboardPage /></Suspense>} />
                 <Route path="devices" element={<Suspense fallback={<Loading />}><DevicesPage /></Suspense>} />
-                <Route path="documents" element={<Suspense fallback={<Loading />}><DocumentsPage /></Suspense>} />
+                <Route path="reports" element={<Suspense fallback={<Loading />}><ReportsPage /></Suspense>} />
+                <Route path="documents" element={<Navigate to="/operations/reports" replace />} />
                 <Route path="analytics" element={<Suspense fallback={<Loading />}><AnalyticsPage /></Suspense>} />
                 <Route path="services" element={<Suspense fallback={<Loading />}><ServicesPage /></Suspense>} />
                 <Route path="timekeeping" element={<Suspense fallback={<Loading />}><TimekeepingPage /></Suspense>} />

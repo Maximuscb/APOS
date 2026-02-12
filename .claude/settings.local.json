@@ -6,7 +6,8 @@
       "Bash(python -m flask db migrate:*)",
       "Bash(python -m flask:*)",
       "Bash(npx vite build)",
-      "Bash($env:FLASK_APP=\"wsgi.py\")"
+      "Bash($env:FLASK_APP=\"wsgi.py\")",
+      "Bash(python -c:*)"
     ]
   }
 }

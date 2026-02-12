@@ -50,10 +50,18 @@ class Sale(db.Model):
     total_due_cents = db.Column(db.Integer, nullable=True)  # Calculated from sale lines
     total_paid_cents = db.Column(db.Integer, nullable=False, default=0)  # Sum of completed payments
     change_due_cents = db.Column(db.Integer, nullable=False, default=0)  # For overpayment
+
+    # Tax tracking
+    tax_cents = db.Column(db.Integer, nullable=True)  # Total tax collected on this sale
+
+    # Customer association (optional)
+    customer_id = db.Column(db.Integer, db.ForeignKey("customers.id"), nullable=True, index=True)
+
     imported_from_batch_id = db.Column(db.Integer, db.ForeignKey("import_batches.id"), nullable=True, index=True)
     version_id = db.Column(db.Integer, nullable=False, default=1)
 
     store = db.relationship("Store", backref=db.backref("sales", lazy=True))
+    customer = db.relationship("Customer", backref=db.backref("sales", lazy=True))
     imported_from_batch = db.relationship("ImportBatch", foreign_keys=[imported_from_batch_id])
     __mapper_args__ = {"version_id_col": version_id}
 
@@ -75,6 +83,8 @@ class Sale(db.Model):
             "total_due_cents": self.total_due_cents,
             "total_paid_cents": self.total_paid_cents,
             "change_due_cents": self.change_due_cents,
+            "tax_cents": self.tax_cents,
+            "customer_id": self.customer_id,
             "version_id": self.version_id,
             "imported_from_batch_id": self.imported_from_batch_id,
         }
@@ -92,6 +102,15 @@ class SaleLine(db.Model):
     unit_price_cents = db.Column(db.Integer, nullable=False)
     line_total_cents = db.Column(db.Integer, nullable=False)
 
+    # Price override / discount tracking
+    original_price_cents = db.Column(db.Integer, nullable=True)  # Catalog price at time of sale
+    discount_cents = db.Column(db.Integer, nullable=True)  # Discount applied to this line
+    discount_reason = db.Column(db.String(255), nullable=True)  # Why discount was given
+    override_approved_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    # Tax tracking
+    tax_cents = db.Column(db.Integer, nullable=True)  # Tax on this line item
+
     # Links to inventory transaction (when posted)
     inventory_transaction_id = db.Column(db.Integer, db.ForeignKey("inventory_transactions.id"), nullable=True)
     version_id = db.Column(db.Integer, nullable=False, default=1)
@@ -100,6 +119,7 @@ class SaleLine(db.Model):
 
     sale = db.relationship("Sale", backref=db.backref("lines", lazy=True))
     product = db.relationship("Product")
+    override_approved_by = db.relationship("User", foreign_keys=[override_approved_by_user_id])
     __mapper_args__ = {"version_id_col": version_id}
 
     def to_dict(self) -> dict:
@@ -110,6 +130,11 @@ class SaleLine(db.Model):
             "quantity": self.quantity,
             "unit_price_cents": self.unit_price_cents,
             "line_total_cents": self.line_total_cents,
+            "original_price_cents": self.original_price_cents,
+            "discount_cents": self.discount_cents,
+            "discount_reason": self.discount_reason,
+            "override_approved_by_user_id": self.override_approved_by_user_id,
+            "tax_cents": self.tax_cents,
             "inventory_transaction_id": self.inventory_transaction_id,
             "version_id": self.version_id,
             "created_at": to_utc_z(self.created_at),

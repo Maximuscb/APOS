@@ -18,7 +18,7 @@ interface StoreItem {
 
 interface RegisterItem {
   id: number;
-  register_number: number;
+  register_number: number | string;
   name: string;
   store_id: number;
   is_active: boolean;

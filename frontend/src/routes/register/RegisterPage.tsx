@@ -17,7 +17,7 @@ type TimekeepingStatus = { status: string; on_break: boolean; entry: { id: numbe
 type SavedSession = { registerId: number; sessionId: number; registerNumber: string; storeId: number };
 
 export function RegisterPage() {
-  const { user, hasPermission, hasRole } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { currentStoreId: storeId, stores, setStoreId } = useStore();
 
   const [products, setProducts] = useState<Product[]>([]);
@@ -40,7 +40,8 @@ export function RegisterPage() {
   const hasManagerPermission = hasPermission('MANAGE_REGISTER');
   const [clockStatus, setClockStatus] = useState<TimekeepingStatus | null>(null);
   const [clockBusy, setClockBusy] = useState(false);
-  const canSwitchStore = hasRole('admin') && stores.length > 1;
+  const [clockError, setClockError] = useState<string | null>(null);
+  const canSwitchStore = hasPermission('MANAGE_STORES') && stores.length > 1;
   const fullscreenAttempted = useRef(false);
 
   useEffect(() => {
@@ -144,6 +145,7 @@ export function RegisterPage() {
 
   async function toggleClock() {
     setClockBusy(true);
+    setClockError(null);
     try {
       if (clockStatus?.status === 'clocked_in') {
         await api.post('/api/timekeeping/clock-out', {});
@@ -151,6 +153,8 @@ export function RegisterPage() {
         await api.post('/api/timekeeping/clock-in', { store_id: storeId });
       }
       await loadClockStatus();
+    } catch (e: any) {
+      setClockError(e?.detail || e?.message || 'Unable to update clock status.');
     } finally {
       setClockBusy(false);
     }
@@ -210,6 +214,11 @@ export function RegisterPage() {
             </Button>
           </div>
         </div>
+        {clockError && (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {clockError}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">

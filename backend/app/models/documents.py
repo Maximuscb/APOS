@@ -471,12 +471,19 @@ class CountLine(db.Model):
 class MasterLedgerEvent(db.Model):
     __tablename__ = "master_ledger_events"
     __table_args__ = (
+        db.Index("ix_master_ledger_org_ledger_occurred", "org_ledger_id", "occurred_at"),
         db.Index("ix_master_ledger_store_occurred", "store_id", "occurred_at"),
         {"sqlite_autoincrement": True},
     )
 
     id = db.Column(db.Integer, primary_key=True)
 
+    org_ledger_id = db.Column(
+        db.Integer,
+        db.ForeignKey("organization_master_ledgers.id"),
+        nullable=False,
+        index=True,
+    )
     store_id = db.Column(db.Integer, db.ForeignKey("stores.id"), nullable=False, index=True)
 
     # What happened
@@ -506,9 +513,16 @@ class MasterLedgerEvent(db.Model):
     note = db.Column(db.String(255), nullable=True)
     payload = db.Column(db.Text, nullable=True)
 
+    organization_master_ledger = db.relationship(
+        "OrganizationMasterLedger",
+        backref=db.backref("events", lazy=True),
+    )
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "org_ledger_id": self.org_ledger_id,
+            "org_id": self.organization_master_ledger.org_id if self.organization_master_ledger else None,
             "store_id": self.store_id,
             "event_type": self.event_type,
             "event_category": self.event_category,

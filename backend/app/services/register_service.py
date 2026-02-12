@@ -14,7 +14,7 @@ DESIGN PRINCIPLES:
 """
 
 from ..extensions import db
-from ..models import Register, RegisterSession, CashDrawerEvent, Sale
+from ..models import Register, RegisterSession, CashDrawerEvent, Sale, Store
 from app.time_utils import utcnow
 from sqlalchemy import and_
 from .concurrency import lock_for_update
@@ -37,10 +37,11 @@ class ShiftError(Exception):
 
 def create_register(
     store_id: int,
-    register_number: str,
+    register_number: str | None,
     name: str,
     location: str | None = None,
-    device_id: str | None = None
+    org_id: int | None = None,
+    actor_user_id: int | None = None,
 ) -> Register:
     """
     Create a new POS register.
@@ -50,11 +51,28 @@ def create_register(
 
     Args:
         store_id: Store this register belongs to
-        register_number: Unique identifier (e.g., "REG-01", "FRONT")
+        register_number: Unique identifier. If omitted, next number is auto-assigned.
         name: Display name
         location: Physical location in store
-        device_id: Device identifier (MAC, serial, etc.)
     """
+    store = db.session.query(Store).filter_by(id=store_id).first()
+    if not store:
+        raise RegisterError("Store not found")
+
+    if org_id is not None and store.org_id != org_id:
+        raise RegisterError("Store does not belong to organization")
+
+    if register_number is None or str(register_number).strip() == "":
+        # Auto-assign next numeric register number within the store.
+        numbers: list[int] = []
+        existing_numbers = db.session.query(Register.register_number).filter_by(store_id=store_id).all()
+        for (num,) in existing_numbers:
+            try:
+                numbers.append(int(str(num)))
+            except (TypeError, ValueError):
+                continue
+        register_number = str((max(numbers) + 1) if numbers else 1)
+
     # Check for duplicate register_number in store
     existing = db.session.query(Register).filter_by(
         store_id=store_id,
@@ -65,15 +83,27 @@ def create_register(
         raise RegisterError(f"Register '{register_number}' already exists in this store")
 
     register = Register(
+        org_id=store.org_id,
         store_id=store_id,
         register_number=register_number,
         name=name,
         location=location,
-        device_id=device_id,
         is_active=True
     )
 
     db.session.add(register)
+    db.session.flush()
+
+    append_ledger_event(
+        store_id=register.store_id,
+        event_type="device.register_created",
+        event_category="device",
+        entity_type="register",
+        entity_id=register.id,
+        actor_user_id=actor_user_id,
+        register_id=register.id,
+        note=f"Register {register.register_number} created",
+    )
     db.session.commit()
 
     return register
